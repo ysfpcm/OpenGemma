@@ -58,7 +58,7 @@ GOOGLE_ALL_SCOPES: List[str] = [
     "openid",
     "email",
     "profile",
-    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive",
     # calendar (not .readonly) so the proactive agent can accept/decline events.
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/contacts.readonly",

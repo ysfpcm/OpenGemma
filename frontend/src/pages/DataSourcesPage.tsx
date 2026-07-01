@@ -15,7 +15,7 @@ import {
   indexMemoryPath,
 } from '../lib/api';
 import type { ChannelBinding, ManagedAgent, MemoryStats, MemorySearchResult } from '../lib/api';
-import { getBase, isTauri } from '../lib/api';
+import { getBase, isTauri, apiFetch } from '../lib/api';
 import {
   Database, MessageSquare, Loader2, Brain, Search, FolderOpen, FileText,
   Mail, Hash, MessageCircle, CalendarDays, Contact, StickyNote, BookText,
@@ -119,14 +119,20 @@ function UploadForm({ onDone }: { onDone?: () => void }) {
     setError('');
     setResult('');
     try {
-      const res = await fetch(`${getBase()}/v1/connectors/upload/ingest`, {
+      const res = await apiFetch(`/v1/connectors/upload/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: title.trim(), content }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || `Upload failed: ${res.status}`);
+        let errMessage = 'Upload failed';
+        try {
+          const errData = await res.json();
+          errMessage = errData.detail || errMessage;
+        } catch (e) {
+          errMessage = await res.text();
+        }
+        throw new Error(errMessage);
       }
       const data = await res.json();
       setResult(`Added ${data.chunks_added} chunk${data.chunks_added !== 1 ? 's' : ''} to knowledge base`);
@@ -150,13 +156,19 @@ function UploadForm({ onDone }: { onDone?: () => void }) {
       for (const f of files) formData.append('files', f);
       if (title.trim()) formData.append('title', title.trim());
 
-      const res = await fetch(`${getBase()}/v1/connectors/upload/ingest/files`, {
+      const res = await apiFetch(`/v1/connectors/upload/ingest/files`, {
         method: 'POST',
         body: formData,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || `Upload failed: ${res.status}`);
+        let errMessage = 'Upload failed';
+        try {
+          const errData = await res.json();
+          errMessage = errData.detail || errMessage;
+        } catch (e) {
+          errMessage = await res.text();
+        }
+        throw new Error(errMessage);
       }
       const data = await res.json();
       setResult(`Added ${data.chunks_added} chunk${data.chunks_added !== 1 ? 's' : ''} from ${files.length} file${files.length !== 1 ? 's' : ''}`);

@@ -37,6 +37,21 @@ _TOOL_ANNOTATIONS: Dict[str, Dict[str, Any]] = {
 }
 
 
+class ConnectorToolWrapper(BaseTool):
+    """Wraps an MCP tool spec from a Connector into an executable BaseTool."""
+
+    def __init__(self, connector: Any, spec: Any) -> None:
+        self._connector = connector
+        self._spec = spec
+
+    @property
+    def spec(self) -> Any:
+        return self._spec
+
+    def execute(self, **kwargs: Any) -> Any:
+        return self._connector.execute_mcp_tool(self._spec.name, **kwargs)
+
+
 class MCPServer:
     """MCP server that exposes OpenJarvis tools via JSON-RPC.
 
@@ -180,6 +195,24 @@ class MCPServer:
                         logger.warning("Failed to register user tool: %s", exc)
         except Exception as exc:
             logger.warning("Failed to discover tools from registry: %s", exc)
+
+        # Auto-discover connector live MCP tools
+        try:
+            from openjarvis.core.registry import ConnectorRegistry
+            try:
+                import openjarvis.connectors  # Ensure they are registered
+            except ImportError:
+                pass
+            for _cid, cls in ConnectorRegistry.items():
+                try:
+                    conn = cls()
+                    if conn.is_connected():
+                        for spec in conn.mcp_tools():
+                            tools.append(ConnectorToolWrapper(conn, spec))
+                except Exception as exc:
+                    logger.warning("Failed to load connector tools from %s: %s", _cid, exc)
+        except Exception as exc:
+            logger.warning("Failed to discover connector tools: %s", exc)
 
         return tools
 

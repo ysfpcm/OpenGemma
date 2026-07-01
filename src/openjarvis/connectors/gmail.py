@@ -130,6 +130,62 @@ def _gmail_api_modify_message(
     resp.raise_for_status()
 
 
+def _gmail_api_send_message(
+    token: str, to: str, subject: str, body_text: str, thread_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Send an email using the Gmail API."""
+    import base64
+    import email.utils
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg.set_content(body_text)
+    msg["To"] = to
+    msg["Subject"] = subject
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+    payload: Dict[str, Any] = {"raw": raw}
+    if thread_id:
+        payload["threadId"] = thread_id
+
+    resp = httpx.post(
+        f"{_GMAIL_API_BASE}/messages/send",
+        headers={"Authorization": f"Bearer {token}"},
+        json=payload,
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _gmail_api_create_draft(
+    token: str, to: str, subject: str, body_text: str, thread_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Create a draft email using the Gmail API."""
+    import base64
+    import email.utils
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg.set_content(body_text)
+    msg["To"] = to
+    msg["Subject"] = subject
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+    payload: Dict[str, Any] = {"message": {"raw": raw}}
+    if thread_id:
+        payload["message"]["threadId"] = thread_id
+
+    resp = httpx.post(
+        f"{_GMAIL_API_BASE}/drafts",
+        headers={"Authorization": f"Bearer {token}"},
+        json=payload,
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def _gmail_api_get_message(token: str, msg_id: str) -> Dict[str, Any]:
     """Fetch a single Gmail message by ID (``full`` format).
 
@@ -153,6 +209,33 @@ def _gmail_api_get_message(token: str, msg_id: str) -> Dict[str, Any]:
     )
     resp.raise_for_status()
     return resp.json()
+
+def _gmail_api_get_attachment(token: str, msg_id: str, attachment_id: str) -> bytes:
+    """Fetch an attachment from a Gmail message."""
+    import base64
+    resp = httpx.get(
+        f"{_GMAIL_API_BASE}/messages/{msg_id}/attachments/{attachment_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=60.0,
+    )
+    resp.raise_for_status()
+    data_b64 = resp.json().get("data", "")
+    padded = data_b64 + "=" * (-len(data_b64) % 4)
+    return base64.urlsafe_b64decode(padded)
+
+
+
+def _gmail_api_get_thread(token: str, thread_id: str) -> Dict[str, Any]:
+    """Fetch a single Gmail thread by ID (``full`` format)."""
+    resp = httpx.get(
+        f"{_GMAIL_API_BASE}/threads/{thread_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"format": "full"},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +380,30 @@ def _parse_date(date_str: str) -> datetime:
         return email.utils.parsedate_to_datetime(date_str)
     except Exception:  # noqa: BLE001
         return datetime.now()
+
+def _extract_attachments(token: str, msg_id: str, payload: Dict[str, Any]) -> str:
+    """Extract and download text from supported attachments (like PDF)."""
+    parts = payload.get("parts", [])
+    extracted_texts = []
+    for part in parts:
+        mime_type = part.get("mimeType", "")
+        if mime_type.startswith("multipart/"):
+            extracted = _extract_attachments(token, msg_id, part)
+            if extracted:
+                extracted_texts.append(extracted)
+        elif part.get("filename") and mime_type == "application/pdf":
+            attachment_id = part.get("body", {}).get("attachmentId")
+            if attachment_id:
+                try:
+                    att_data = _gmail_api_get_attachment(token, msg_id, attachment_id)
+                    import io
+                    import pdfplumber
+                    with pdfplumber.open(io.BytesIO(att_data)) as pdf:
+                        pdf_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+                    extracted_texts.append(f"[Attachment: {part['filename']}]\n{pdf_text}")
+                except Exception as e:
+                    extracted_texts.append(f"[Attachment: {part['filename']} - Failed to extract PDF text: {e}]")
+    return "\n\n".join(extracted_texts)
 
 
 def _normalize_addresses(raw: str) -> List[str]:
@@ -650,4 +757,127 @@ class GmailConnector(BaseConnector):
                 },
                 category="communication",
             ),
+            ToolSpec(
+                name="gmail_send_email",
+                description="Send an email via Gmail. WARNING: ONLY use this if the user EXPLICITLY asks to SEND the email immediately without reviewing. Otherwise, ALWAYS default to using gmail_draft_email so the user can review it first.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string", "description": "Recipient email address"},
+                        "subject": {"type": "string", "description": "Email subject"},
+                        "body_text": {"type": "string", "description": "Plain text email body"},
+                        "thread_id": {"type": "string", "description": "Optional: Gmail thread ID to reply to"},
+                    },
+                    "required": ["to", "subject", "body_text"],
+                },
+                category="communication",
+            ),
+            ToolSpec(
+                name="gmail_draft_email",
+                description="Create a draft email via Gmail (does not send it).",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string", "description": "Recipient email address"},
+                        "subject": {"type": "string", "description": "Email subject"},
+                        "body_text": {"type": "string", "description": "Plain text email body"},
+                        "thread_id": {"type": "string", "description": "Optional: Gmail thread ID to reply to"},
+                    },
+                    "required": ["to", "subject", "body_text"],
+                },
+                category="communication",
+            ),
         ]
+
+    def execute_mcp_tool(self, name: str, **kwargs: Any) -> Any:
+        """Execute real-time MCP tools for Gmail."""
+        from openjarvis.core.types import ToolResult
+
+        try:
+            if name == "gmail_search_emails":
+                query = kwargs.get("query", "")
+                max_results = int(kwargs.get("max_results", 20))
+                resp = self._call_with_refresh(_gmail_api_list_messages, query=query)
+                messages = resp.get("messages", [])[:max_results]
+                out = []
+                for m in messages:
+                    msg = self._call_with_refresh(_gmail_api_get_message, m["id"])
+                    payload = msg.get("payload", {})
+                    headers = payload.get("headers", [])
+                    subject = _extract_header(headers, "Subject")
+                    author = _extract_header(headers, "From")
+                    date = _extract_header(headers, "Date")
+                    out.append(f"Thread ID: {msg.get('threadId', m['id'])} | Message ID: {m['id']} | Date: {date} | From: {author} | Subject: {subject}\nSnippet: {msg.get('snippet', '')}")
+                content = "\n\n".join(out) if out else "No emails found matching query."
+                return ToolResult(tool_name=name, content=content, success=True)
+                
+            elif name == "gmail_get_thread":
+                thread_id = kwargs.get("thread_id", "")
+                try:
+                    resp = self._call_with_refresh(_gmail_api_get_thread, thread_id)
+                    messages = resp.get("messages", [])
+                    out = []
+                    for msg in messages:
+                        payload = msg.get("payload", {})
+                        headers = payload.get("headers", [])
+                        author = _extract_header(headers, "From")
+                        date = _extract_header(headers, "Date")
+                        body = _decode_body(payload)
+                        attachments = self._call_with_refresh(_extract_attachments, msg["id"], payload)
+                        if attachments:
+                            body += f"\n\n--- Attachments ---\n{attachments}"
+                        out.append(f"--- Message from {author} on {date} ---\n{body}")
+                    content = "\n\n".join(out) if out else "Thread not found or empty."
+                    return ToolResult(tool_name=name, content=content, success=True)
+                except Exception as e:
+                    return ToolResult(tool_name=name, content=f"Failed to get thread: {e}", success=False)
+                
+            elif name == "gmail_list_unread":
+                label = kwargs.get("label", "INBOX")
+                max_results = int(kwargs.get("max_results", 20))
+                query = f"label:{label} is:unread"
+                resp = self._call_with_refresh(_gmail_api_list_messages, query=query)
+                messages = resp.get("messages", [])[:max_results]
+                out = []
+                for m in messages:
+                    msg = self._call_with_refresh(_gmail_api_get_message, m["id"])
+                    payload = msg.get("payload", {})
+                    headers = payload.get("headers", [])
+                    subject = _extract_header(headers, "Subject")
+                    author = _extract_header(headers, "From")
+                    date = _extract_header(headers, "Date")
+                    out.append(f"Thread ID: {msg.get('threadId', m['id'])} | Message ID: {m['id']} | Date: {date} | From: {author} | Subject: {subject}\nSnippet: {msg.get('snippet', '')}")
+                content = "\n\n".join(out) if out else "No unread emails found."
+                return ToolResult(tool_name=name, content=content, success=True)
+                
+            elif name == "gmail_send_email":
+                to = kwargs.get("to", "")
+                subject = kwargs.get("subject", "")
+                body_text = kwargs.get("body_text", "")
+                thread_id = kwargs.get("thread_id")
+                try:
+                    resp = self._call_with_refresh(
+                        _gmail_api_send_message, to, subject, body_text, thread_id
+                    )
+                    return ToolResult(tool_name=name, content=f"Successfully sent email. Response: {resp}", success=True)
+                except Exception as e:
+                    return ToolResult(tool_name=name, content=f"Failed to send email: {e}", success=False)
+                    
+            elif name == "gmail_draft_email":
+                to = kwargs.get("to", "")
+                subject = kwargs.get("subject", "")
+                body_text = kwargs.get("body_text", "")
+                thread_id = kwargs.get("thread_id")
+                try:
+                    resp = self._call_with_refresh(
+                        _gmail_api_create_draft, to, subject, body_text, thread_id
+                    )
+                    return ToolResult(tool_name=name, content=f"Successfully created draft email. Response: {resp}", success=True)
+                except Exception as e:
+                    return ToolResult(tool_name=name, content=f"Failed to create draft: {e}", success=False)
+
+            return super().execute_mcp_tool(name, **kwargs)
+        except Exception as exc:
+            from openjarvis.core.types import ToolResult
+            return ToolResult(tool_name=name, content=f"Error executing {name}: {exc}", success=False)
+

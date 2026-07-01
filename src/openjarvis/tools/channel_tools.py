@@ -45,7 +45,7 @@ class ChannelSendTool(BaseTool):
                         "description": "Optional conversation/thread ID for replies.",
                     },
                 },
-                "required": ["channel", "content"],
+                "required": ["content"],
             },
             category="channel",
         )
@@ -59,10 +59,10 @@ class ChannelSendTool(BaseTool):
             )
         target = params.get("channel", "")
         content = params.get("content", "")
-        if not target or not content:
+        if not content:
             return ToolResult(
                 tool_name="channel_send",
-                content="Both 'channel' and 'content' are required.",
+                content="'content' is required.",
                 success=False,
             )
         try:

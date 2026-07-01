@@ -50,6 +50,7 @@ def _gdrive_api_list_files(
     token: str,
     *,
     page_token: Optional[str] = None,
+    query: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Call the Drive ``files.list`` endpoint.
 
@@ -59,6 +60,8 @@ def _gdrive_api_list_files(
         OAuth access token.
     page_token:
         Pagination token from a previous response's ``nextPageToken``.
+    query:
+        Optional Drive search query string.
 
     Returns
     -------
@@ -74,6 +77,8 @@ def _gdrive_api_list_files(
     }
     if page_token:
         params["pageToken"] = page_token
+    if query:
+        params["q"] = query
 
     resp = httpx.get(
         f"{_GDRIVE_API_BASE}/files",
@@ -111,6 +116,29 @@ def _gdrive_api_export(token: str, file_id: str, mime_type: str) -> str:
     resp.raise_for_status()
     return resp.text
 
+def _gdrive_api_download(token: str, file_id: str) -> bytes:
+    """Download a raw file from Google Drive (e.g. PDF)."""
+    resp = httpx.get(
+        f"{_GDRIVE_API_BASE}/files/{file_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"alt": "media"},
+        timeout=60.0,
+    )
+    resp.raise_for_status()
+    return resp.content
+
+def _gdrive_api_update_file(token: str, file_id: str, content: str) -> dict:
+    """Overwrite the contents of a Google Drive file using uploadType=media."""
+    # This overwrites the existing file data with raw text content.
+    resp = httpx.patch(
+        f"https://www.googleapis.com/upload/drive/v3/files/{file_id}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "text/plain"},
+        params={"uploadType": "media"},
+        content=content,
+        timeout=60.0,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 # ---------------------------------------------------------------------------
 # GDriveConnector
@@ -339,7 +367,7 @@ class GDriveConnector(BaseConnector):
                 name="gdrive_get_document",
                 description=(
                     "Retrieve the full text content of a Google Drive"
-                    " document by file ID."
+                    " document or file by file ID. Supports Google Workspace docs and PDFs."
                 ),
                 parameters={
                     "type": "object",
@@ -380,4 +408,101 @@ class GDriveConnector(BaseConnector):
                 },
                 category="productivity",
             ),
+            ToolSpec(
+                name="gdrive_update_document",
+                description=(
+                    "Update or overwrite the text contents of a Google Drive file."
+                    " WARNING: For Google Workspace docs (Docs/Sheets), this drops formatting and replaces it with plain text."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "file_id": {
+                            "type": "string",
+                            "description": "Google Drive file ID",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The new plain text content to write to the document",
+                        },
+                    },
+                    "required": ["file_id", "content"],
+                },
+                category="productivity",
+            ),
         ]
+
+    def execute_mcp_tool(self, name: str, **kwargs: Any) -> Any:
+        """Execute real-time MCP tools for Google Drive."""
+        from openjarvis.core.types import ToolResult
+
+        try:
+            if name == "gdrive_search_files":
+                query = kwargs.get("query", "")
+                max_results = int(kwargs.get("max_results", 20))
+                resp = call_with_refresh(_gdrive_api_list_files, self._credentials_path, query=query)
+                files = resp.get("files", [])[:max_results]
+                out = []
+                for f in files:
+                    out.append(f"ID: {f.get('id')} | Name: {f.get('name')} | Type: {f.get('mimeType')} | Link: {f.get('webViewLink')}")
+                content = "\n".join(out) if out else "No files found matching query."
+                return ToolResult(tool_name=name, content=content, success=True)
+
+            elif name == "gdrive_get_document":
+                file_id = kwargs.get("file_id", "")
+                # We need to know the mimeType to export it. We can get it from list files with query.
+                resp = call_with_refresh(_gdrive_api_list_files, self._credentials_path, query=f"'{file_id}' in parents") # Just trying to find it, or we can just fetch it directly.
+                # Wait, getting file metadata requires a different API call. 
+                # Let's just try exporting it as plain text first.
+                try:
+                    content = call_with_refresh(_gdrive_api_export, self._credentials_path, file_id, "text/plain")
+                    return ToolResult(tool_name=name, content=content[:20000], success=True)
+                except Exception as e:
+                    # If it fails, try downloading as raw file (e.g. PDF)
+                    try:
+                        raw_bytes = call_with_refresh(_gdrive_api_download, self._credentials_path, file_id)
+                        import io
+                        import pdfplumber
+                        with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
+                            extracted = "\n".join(page.extract_text() or "" for page in pdf.pages)
+                        return ToolResult(tool_name=name, content=extracted[:20000], success=True)
+                    except Exception as e2:
+                        return ToolResult(
+                            tool_name=name, 
+                            content=f"Failed to read file. It might not be a supported document type. Export Error: {e}, Download Error: {e2}", 
+                            success=False
+                        )
+
+            elif name == "gdrive_list_recent":
+                file_type = kwargs.get("file_type", "")
+                max_results = int(kwargs.get("max_results", 20))
+                
+                query = ""
+                if file_type == "document":
+                    query = "mimeType='application/vnd.google-apps.document'"
+                elif file_type == "spreadsheet":
+                    query = "mimeType='application/vnd.google-apps.spreadsheet'"
+                elif file_type == "presentation":
+                    query = "mimeType='application/vnd.google-apps.presentation'"
+                
+                resp = call_with_refresh(_gdrive_api_list_files, self._credentials_path, query=query)
+                files = resp.get("files", [])[:max_results]
+                out = []
+                for f in files:
+                    out.append(f"ID: {f.get('id')} | Name: {f.get('name')} | Type: {f.get('mimeType')} | Link: {f.get('webViewLink')}")
+                content = "\n".join(out) if out else "No recent files found."
+                return ToolResult(tool_name=name, content=content, success=True)
+
+            elif name == "gdrive_update_document":
+                file_id = kwargs.get("file_id", "")
+                content = kwargs.get("content", "")
+                try:
+                    resp = call_with_refresh(_gdrive_api_update_file, self._credentials_path, file_id, content)
+                    return ToolResult(tool_name=name, content=f"Successfully updated document {file_id}. Response: {resp}", success=True)
+                except Exception as e:
+                    return ToolResult(tool_name=name, content=f"Failed to update document: {e}", success=False)
+
+            return super().execute_mcp_tool(name, **kwargs)
+        except Exception as exc:
+            from openjarvis.core.types import ToolResult
+            return ToolResult(tool_name=name, content=f"Error executing {name}: {exc}", success=False)

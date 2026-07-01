@@ -49,7 +49,9 @@ def create_security_middleware() -> Any:
                 "camera=(), microphone=(), geolocation=()"
             )
             response.headers["Content-Security-Policy"] = (
-                "default-src 'self' 'unsafe-inline' 'unsafe-eval'"
+                "default-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "img-src 'self' data:; "
+                "connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*"
             )
             return response
 
@@ -64,5 +66,5 @@ SECURITY_HEADERS = {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    "Content-Security-Policy": "default-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    "Content-Security-Policy": "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
 }

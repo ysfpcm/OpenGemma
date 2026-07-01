@@ -211,6 +211,25 @@ class JarvisSystem:
                 consolidation_threshold=self.config.sessions.consolidation_threshold,
             )
 
+        self.channel_backend = channel_bridge
+        
+        # Inject channel_bridge into channel tools, or add ChannelSendTool if missing
+        has_channel_send = False
+        for t in self.tools:
+            if type(t).__name__ in ("ChannelSendTool", "ChannelListTool", "ChannelStatusTool"):
+                t._channel = channel_bridge
+                if type(t).__name__ == "ChannelSendTool":
+                    has_channel_send = True
+                    
+        if not has_channel_send:
+            from openjarvis.tools.channel_tools import ChannelSendTool
+            cst = ChannelSendTool(channel=channel_bridge)
+            self.tools.append(cst)
+            if self.tool_executor:
+                self.tool_executor._tools[cst.spec.name] = cst
+            if self.agent and hasattr(self.agent, "_executor") and self.agent._executor:
+                self.agent._executor._tools[cst.spec.name] = cst
+
         _system = self  # capture for closure
 
         def _on_channel_message(cm) -> None:

@@ -296,7 +296,7 @@ def serve(
                     from openjarvis.tools._stubs import BaseTool
 
                     _DEFAULT_TOOLS = {"think", "calculator", "web_search"}
-                    configured = config.agent.tools
+                    configured = config.tools.enabled or config.agent.tools
                     if configured:
                         if isinstance(configured, list):
                             allowed = {
@@ -337,6 +337,21 @@ def serve(
                             if t.spec.name not in existing:
                                 tools.append(t)
                                 existing.add(t.spec.name)
+
+                    # Auto-discover connector live MCP tools
+                    from openjarvis.core.registry import ConnectorRegistry
+                    from openjarvis.mcp.server import ConnectorToolWrapper
+                    existing = {t.spec.name for t in tools}
+                    for _cid, cls in ConnectorRegistry.items():
+                        try:
+                            conn = cls()
+                            if conn.is_connected():
+                                for spec in conn.mcp_tools():
+                                    if spec.name not in existing:
+                                        tools.append(ConnectorToolWrapper(conn, spec))
+                                        existing.add(spec.name)
+                        except Exception as exc:
+                            logger.warning("Failed to load connector tools from %s: %s", _cid, exc)
 
                     if tools:
                         agent_kwargs["tools"] = tools
@@ -400,7 +415,7 @@ def serve(
                         from openjarvis.tools._stubs import BaseTool
 
                         _DEFAULT_TOOLS = {"think", "calculator", "web_search"}
-                        configured = config.agent.tools
+                        configured = config.tools.enabled or config.agent.tools
                         if configured:
                             if isinstance(configured, list):
                                 _allowed = {
@@ -441,6 +456,22 @@ def serve(
                                 if t.spec.name not in _existing:
                                     _channel_tools.append(t)
                                     _existing.add(t.spec.name)
+                                    
+                        # Auto-discover connector live MCP tools
+                        from openjarvis.core.registry import ConnectorRegistry
+                        from openjarvis.mcp.server import ConnectorToolWrapper
+                        _existing = {t.spec.name for t in _channel_tools}
+                        for _cid, cls in ConnectorRegistry.items():
+                            try:
+                                conn = cls()
+                                if conn.is_connected():
+                                    for spec in conn.mcp_tools():
+                                        if spec.name not in _existing:
+                                            _channel_tools.append(ConnectorToolWrapper(conn, spec))
+                                            _existing.add(spec.name)
+                            except Exception as exc:
+                                logger.warning("Failed to load connector tools from %s: %s", _cid, exc)
+
                         # Hold a reference at module / function scope —
                         # the channel agent is constructed inside
                         # JarvisSystem below; we extend its lifetime by

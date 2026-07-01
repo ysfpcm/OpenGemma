@@ -70,7 +70,10 @@ export default function App() {
     fetchModels()
       .then((m) => {
         setModels(m);
-        if (!selectedModel && m.length > 0) setSelectedModel(m[0].id);
+        if (!selectedModel && m.length > 0) {
+          const gpt4o = m.find(model => model.id.includes('gpt-4o'));
+          setSelectedModel(gpt4o ? gpt4o.id : m[0].id);
+        }
       })
       .catch(() => setModels([]))
       .finally(() => setModelsLoading(false));

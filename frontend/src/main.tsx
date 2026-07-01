@@ -7,6 +7,8 @@ import { initApiBase } from './lib/api';
 import { initAnalytics } from './lib/analytics';
 import './index.css';
 
+
+
 function applyTheme() {
   try {
     const raw = localStorage.getItem('openjarvis-settings');

@@ -432,6 +432,30 @@ def _resolve_tool_specs(
             resolved.append(spec_dict)
             seen.add(entry)
 
+    # Auto-inject connector tools
+    from openjarvis.core.registry import ConnectorRegistry
+    try:
+        import openjarvis.connectors  # Ensure they are registered
+    except ImportError:
+        pass
+    for _cid, cls in ConnectorRegistry.items():
+        try:
+            conn = cls()
+            if conn.is_connected():
+                for spec in conn.mcp_tools():
+                    if spec.name not in seen:
+                        resolved.append({
+                            "type": "function",
+                            "function": {
+                                "name": spec.name,
+                                "description": spec.description,
+                                "parameters": spec.parameters,
+                            },
+                        })
+                        seen.add(spec.name)
+        except Exception as exc:
+            logger.warning("Failed to auto-inject tools for connector %s: %s", _cid, exc)
+
     return resolved
 
 
@@ -860,6 +884,77 @@ async def _stream_managed_agent(
             Message(role=Role.SYSTEM, content=final_system_prompt.strip())
         )
 
+    # Inject knowledge context from KnowledgeStore (connector-indexed
+    # documents: Gmail, Drive, Calendar, etc.) so the agent has RAG
+    # context on the first turn without needing a tool call round-trip.
+    try:
+        from pathlib import Path as _KBPath
+
+        from openjarvis.connectors.store import KnowledgeStore
+        from openjarvis.core.config import DEFAULT_CONFIG_DIR
+
+        _kb_path = DEFAULT_CONFIG_DIR / "knowledge.db"
+        if _KBPath(_kb_path).exists() and user_content:
+            _kb_store = KnowledgeStore(str(_kb_path))
+            try:
+                _kb_results = _kb_store.retrieve(user_content, top_k=5)
+                if not _kb_results:
+                    import re
+                    _terms = [t for t in re.findall(r'\b\w+\b', user_content) if len(t) > 3]
+                    if _terms:
+                        _or_query = " OR ".join(_terms)
+                        _kb_results = _kb_store.retrieve(_or_query, top_k=5)
+            finally:
+                _kb_store.close()
+            if _kb_results:
+                _kb_parts: list = []
+                for _i, _r in enumerate(_kb_results, start=1):
+                    _meta = _r.metadata
+                    _src = _r.source or _meta.get("source", "")
+                    _title = _meta.get("title", "")
+                    _author = _meta.get("author", "")
+                    _ts = _meta.get("timestamp", "")
+                    _hdr = " ".join(
+                        p
+                        for p in [
+                            f"[{_src}]" if _src else "",
+                            _title,
+                            f"by {_author}" if _author else "",
+                            f"({_ts})" if _ts else "",
+                        ]
+                        if p
+                    ) or "(unknown source)"
+                    _kb_parts.append(
+                        f"--- Document {_i}: {_hdr} ---\n{_r.content[:1500]}"
+                    )
+                _kb_ctx = "\n\n".join(_kb_parts)
+                if len(_kb_ctx) > 16000:
+                    _kb_ctx = _kb_ctx[:16000] + "\n\n[... truncated]"
+                from datetime import datetime
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                _system_content = (
+                    f"Current Date and Time: {current_time}\n"
+                    "You have direct access to the user's personal data (email, Google Drive, calendar, etc.) via the provided context below and your available tools. "
+                    "You MUST answer the user's query using this data. Do NOT refuse to answer, do NOT ask for permission, and do NOT state that you lack access or need to connect to an account. "
+                    "If the provided context is insufficient or the user asks for the latest/current information, use your tools (like digest_collect) to fetch the latest data, and answer using the tool output. "
+                    "Cite the source when referencing specific documents.\n\n" + _kb_ctx
+                )
+                
+                llm_messages.append(
+                    Message(
+                        role=Role.SYSTEM,
+                        content=_system_content,
+                    )
+                )
+                logger.info(
+                    "Injected %d knowledge chunks for managed agent query: %.80s",
+                    len(_kb_results),
+                    user_content,
+                )
+    except Exception:
+        logger.debug("Knowledge injection for managed agent failed", exc_info=True)
+
     # Resolve agent type and class for DeepResearch tool wiring
     agent_type = agent_record.get("agent_type", "")
     if agent_type == "deep_research":
@@ -1261,6 +1356,10 @@ async def _stream_managed_agent(
             current_finish_reason = None
 
             try:
+                import pprint
+                logger.info("=== MESSAGES FOR LLM (Turn %d) ===", turns)
+                logger.info(pprint.pformat(messages_for_llm))
+                
                 async for chunk in engine.stream_full(
                     messages_for_llm,
                     model=model,

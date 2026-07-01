@@ -16,25 +16,47 @@ export const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_I
 export type CloudKeyStatus = Record<string, boolean>;
 
 export async function getCloudKeyStatus(): Promise<CloudKeyStatus> {
-  if (!isTauri()) return {};
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    const rows = await invoke<Array<{ key: string; set: boolean }>>('get_cloud_key_status');
-    return Object.fromEntries(rows.map((row) => [row.key, row.set]));
-  } catch (e: any) {
-    throw new Error(e?.message ?? e ?? 'Failed to read cloud key status');
+  if (isTauri()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const rows = await invoke<Array<{ key: string; set: boolean }>>('get_cloud_key_status');
+      return Object.fromEntries(rows.map((row) => [row.key, row.set]));
+    } catch (e: any) {
+      throw new Error(e?.message ?? e ?? 'Failed to read cloud key status');
+    }
+  } else {
+    try {
+      const res = await apiFetch('/v1/cloud/keys');
+      if (!res.ok) throw new Error(`Failed to fetch cloud key status: ${res.status}`);
+      return await res.json();
+    } catch {
+      return {};
+    }
   }
 }
 
 export async function saveCloudKey(keyName: string, keyValue: string): Promise<void> {
-  if (!isTauri()) {
-    throw new Error('Cloud API keys can be saved in the desktop app only.');
-  }
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('save_cloud_key', { keyName, keyValue });
-  } catch (e: any) {
-    throw new Error(e?.message ?? e ?? 'Failed to save cloud key');
+  if (isTauri()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('save_cloud_key', { keyName, keyValue });
+    } catch (e: any) {
+      throw new Error(e?.message ?? e ?? 'Failed to save cloud key');
+    }
+  } else {
+    try {
+      const res = await apiFetch('/v1/cloud/reload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys: { [keyName]: keyValue } }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `Failed to save key: ${res.status}`);
+      }
+    } catch (e: any) {
+      throw new Error(e.message || 'Failed to save cloud key');
+    }
   }
 }
 

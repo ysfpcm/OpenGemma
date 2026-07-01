@@ -437,6 +437,12 @@ class SystemBuilder:
         if tool_names:
             all_tools = {t.spec.name: t for t in internal_server.get_tools()}
             tools = [all_tools[n] for n in tool_names if n in all_tools]
+            
+            # Auto-include connector tools that were discovered
+            from openjarvis.mcp.server import ConnectorToolWrapper
+            for t in internal_server.get_tools():
+                if isinstance(t, ConnectorToolWrapper) and t.spec.name not in tool_names:
+                    tools.append(t)
         else:
             tools = []
 

@@ -108,3 +108,14 @@ class BaseConnector(ABC):
     def mcp_tools(self) -> List[ToolSpec]:
         """Return MCP tool specs for real-time agent queries.  Optional."""
         return []
+
+    def execute_mcp_tool(self, name: str, **kwargs: Any) -> Any:
+        """Execute an MCP tool defined by this connector.
+
+        Raises ``NotImplementedError`` by default. Subclasses that expose
+        tools via :meth:`mcp_tools` must implement this method to handle
+        the execution.
+        """
+        raise NotImplementedError(
+            f"Connector {self.connector_id} does not implement tool execution"
+        )

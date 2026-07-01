@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Cpu, X, Download, Loader2, Trash2, Check, Cloud, Key, Eye, EyeOff } from 'lucide-react';
+import { Search, Cpu, X, Download, Loader2, Trash2, Check, Cloud, Key, Eye, EyeOff, ClipboardPaste } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import {
   pullModel,
@@ -101,17 +101,13 @@ export function CommandPalette() {
   const desktopKeyStorage = isTauri();
 
   const refreshCloudKeyStatus = useCallback(async () => {
-    if (!desktopKeyStorage) {
-      setCloudKeyStatus({});
-      return;
-    }
     try {
       setCloudKeyStatus(await getCloudKeyStatus());
       setCloudKeyError(null);
     } catch (e: any) {
       setCloudKeyError(e?.message || 'Failed to read cloud key status');
     }
-  }, [desktopKeyStorage]);
+  }, []);
 
   const filtered = tab === 'installed'
     ? (query
@@ -144,6 +140,14 @@ export function CommandPalette() {
   }, [pullSuccess]);
 
   const handleSelect = async (modelId: string) => {
+    // Save any pending keys first to avoid unmount race conditions
+    for (const provider of CLOUD_PROVIDERS) {
+      const pendingKey = apiKeys[provider.envKey];
+      if (pendingKey && pendingKey.trim()) {
+        await handleSaveKey(provider, pendingKey);
+      }
+    }
+
     const previousModel = selectedModel;
     setSelectedModel(modelId);
     setCommandPaletteOpen(false);
@@ -451,9 +455,7 @@ export function CommandPalette() {
             /* ── Cloud Models tab ── */
             <div className="px-4 py-2">
               <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>
-                {desktopKeyStorage
-                  ? 'Add your API keys to use cloud models. Keys are stored in secure desktop storage.'
-                  : 'Configure cloud provider keys in the server environment to use cloud models.'}
+                Add your API keys to use cloud models. Keys are stored securely.
               </div>
 
               {CLOUD_PROVIDERS.map((provider) => {
@@ -485,15 +487,33 @@ export function CommandPalette() {
                           onChange={(e) => setApiKeys((prev) => ({ ...prev, [provider.envKey]: e.target.value }))}
                           onBlur={() => handleKeyBlur(provider)}
                           placeholder={hasSavedKey ? 'Saved in secure storage' : provider.envKey}
-                          disabled={!desktopKeyStorage || isSaving}
+                          disabled={isSaving}
                           className="flex-1 text-xs px-2 py-1.5 bg-transparent outline-none font-mono"
                           style={{ color: 'var(--color-text)' }}
                         />
                         <button
                           onClick={() => setShowKeys((prev) => ({ ...prev, [provider.envKey]: !prev[provider.envKey] }))}
-                          className="px-2 cursor-pointer" style={{ color: 'var(--color-text-tertiary)' }}
+                          className="px-2 cursor-pointer transition-colors hover:text-white" style={{ color: 'var(--color-text-tertiary)' }}
+                          title={isVisible ? "Hide key" : "Show key"}
                         >
                           {isVisible ? <EyeOff size={12} /> : <Eye size={12} />}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const text = await navigator.clipboard.readText();
+                              if (text) {
+                                setApiKeys((prev) => ({ ...prev, [provider.envKey]: text }));
+                                await handleSaveKey(provider, text);
+                              }
+                            } catch (err) {
+                              console.error('Failed to read clipboard', err);
+                            }
+                          }}
+                          className="px-2 cursor-pointer transition-colors hover:text-white" style={{ color: 'var(--color-text-tertiary)' }}
+                          title="Paste from clipboard"
+                        >
+                          <ClipboardPaste size={12} />
                         </button>
                       </div>
                       {hasSavedKey && (

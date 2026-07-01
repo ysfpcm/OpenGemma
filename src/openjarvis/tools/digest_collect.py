@@ -34,6 +34,7 @@ _SECTION_ORDER: List[tuple] = [
         },
     ),
     ("CALENDAR", {"gcalendar"}),
+    ("DOCUMENTS", {"gdrive", "dropbox", "obsidian"}),
     ("WORLD", {"weather", "hackernews", "news_rss"}),
     ("MUSIC", {"spotify", "apple_music"}),
 ]
@@ -333,6 +334,16 @@ def _format_news_rss(doc: Document) -> str:
     return line
 
 
+def _format_gdrive(doc: Document) -> str:
+    """Format a Google Drive document."""
+    author = doc.author or "Unknown"
+    title = doc.title or "Untitled"
+    ago = _time_ago(doc.timestamp)
+    url = f" ({doc.url})" if doc.url else ""
+    file_id = doc.metadata.get("file_id", doc.doc_id)
+    return f"[gdrive id={file_id}] {title} by {author} (modified {ago}){url}"
+
+
 # Map connector IDs to their formatting functions
 _FORMATTERS: Dict[str, Any] = {
     "oura": _format_oura,
@@ -353,6 +364,7 @@ _FORMATTERS: Dict[str, Any] = {
     "news_rss": _format_news_rss,
     "spotify": _format_spotify,
     "apple_music": _format_apple_music,
+    "gdrive": _format_gdrive,
 }
 
 

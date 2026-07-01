@@ -89,6 +89,111 @@ def _ensure_identity_prompt(messages: list[Message], app_config) -> list[Message
     return [Message(role=Role.SYSTEM, content=prompt), *messages]
 
 
+def _inject_knowledge_context(request_body: "ChatCompletionRequest") -> None:
+    """Inject relevant documents from KnowledgeStore into the conversation.
+
+    Searches the connector-indexed knowledge base (Gmail, Google Drive,
+    Calendar, Slack, etc.) using BM25 and prepends matching document
+    chunks as a system message so the LLM can answer questions about
+    the user's personal data.
+
+    Without this, the ``/v1/chat/completions`` endpoint sends the user's
+    query directly to the model which has no access to indexed documents
+    and responds with generic "I can't access your emails" messages.
+    """
+    from pathlib import Path
+
+    from openjarvis.connectors.store import KnowledgeStore
+    from openjarvis.core.config import DEFAULT_CONFIG_DIR
+
+    knowledge_db = DEFAULT_CONFIG_DIR / "knowledge.db"
+    if not Path(knowledge_db).exists():
+        return
+
+    # Extract the user's query from the last user message
+    query_text = ""
+    for m in reversed(request_body.messages):
+        if m.role == "user" and m.content:
+            query_text = m.content
+            break
+
+    if not query_text:
+        return
+
+    store = KnowledgeStore(str(knowledge_db))
+    try:
+        results = store.retrieve(query_text, top_k=5)
+        # Fallback to an OR query if natural language exact match fails
+        if not results:
+            import re
+            terms = [t for t in re.findall(r'\b\w+\b', query_text) if len(t) > 3]
+            if terms:
+                or_query = " OR ".join(terms)
+                results = store.retrieve(or_query, top_k=5)
+    finally:
+        store.close()
+
+    if not results:
+        return
+
+    # Format results with source attribution
+    context_parts: list[str] = []
+    for i, result in enumerate(results, start=1):
+        meta = result.metadata
+        src = result.source or meta.get("source", "")
+        title = meta.get("title", "")
+        author = meta.get("author", "")
+        timestamp = meta.get("timestamp", "")
+
+        header_parts: list[str] = []
+        if src:
+            header_parts.append(f"[{src}]")
+        if title:
+            header_parts.append(title)
+        if author:
+            header_parts.append(f"by {author}")
+        if timestamp:
+            header_parts.append(f"({timestamp})")
+
+        header = " ".join(header_parts) if header_parts else "(unknown source)"
+        # Cap each chunk to avoid overwhelming the context window
+        content = result.content[:1500]
+        context_parts.append(f"--- Document {i}: {header} ---\n{content}")
+
+    knowledge_context = "\n\n".join(context_parts)
+
+    # Cap total injected context to ~4000 tokens (~16000 chars)
+    if len(knowledge_context) > 16000:
+        knowledge_context = knowledge_context[:16000] + "\n\n[... additional results truncated]"
+
+    # Build the system message with knowledge context
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    system_content = (
+        f"Current Date and Time: {current_time}\n"
+        "You have direct access to the user's personal data (email, Google Drive, calendar, etc.) via the provided context below and your available tools. "
+        "You MUST answer the user's query using this data. Do NOT refuse to answer, do NOT ask for permission, and do NOT state that you lack access or need to connect to an account. "
+        "If the provided context is insufficient or the user asks for the latest/current information, use your tools (like digest_collect) to fetch the latest data, and answer using the tool output. "
+        "Cite the source when referencing specific documents.\n\n"
+        f"{knowledge_context}"
+    )
+
+    from openjarvis.server.models import ChatMessage
+
+    knowledge_msg = ChatMessage(role="system", content=system_content)
+
+    # Insert knowledge context as the first message (before any existing
+    # system prompt) so it's available to the model
+    request_body.messages.insert(0, knowledge_msg)
+
+    logging.getLogger("openjarvis.server").info(
+        "Injected %d knowledge chunks (%d chars) for query: %.80s",
+        len(results),
+        len(knowledge_context),
+        query_text,
+    )
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(request_body: ChatCompletionRequest, request: Request):
     """Handle chat completion requests (streaming and non-streaming)."""
@@ -149,6 +254,20 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 exc_info=True,
             )
 
+    # Inject knowledge context from KnowledgeStore (connector-indexed
+    # documents: Gmail, Google Drive, Calendar, Slack, etc.) into the
+    # conversation so the LLM can answer questions about the user's
+    # personal data. Without this, the model has no access to indexed
+    # documents and responds with "I can't access your emails."
+    if request_body.messages:
+        try:
+            _inject_knowledge_context(request_body)
+        except Exception:
+            logging.getLogger("openjarvis.server").debug(
+                "Knowledge context injection failed",
+                exc_info=True,
+            )
+
     # Run complexity analysis on the last user message
     complexity_info = None
     query_text_for_complexity = ""
@@ -203,6 +322,17 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 bus=getattr(request.app.state, "bus", None),
                 memory_service=getattr(request.app.state, "memory_service", None),
             )
+
+        if agent is not None:
+            from openjarvis.server.stream_bridge import create_agent_stream
+
+            return await create_agent_stream(
+                agent,
+                getattr(request.app.state, "bus", None),
+                model,
+                request_body,
+            )
+
         return await _handle_stream(
             engine,
             model,
@@ -360,6 +490,35 @@ def _handle_direct(
         # the lightweight wrapper for engines that aren't already
         # instrumented.
         if isinstance(engine, InstrumentedEngine):
+            try:
+                result = engine.generate(
+                    messages,
+                    model=model,
+                    temperature=req.temperature,
+                    max_tokens=req.max_tokens,
+                    **kwargs,
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger("openjarvis.server").error("Error in engine.generate (instrumented)", exc_info=True)
+                result = {"content": f"Error during generation: {exc}", "finish_reason": "stop"}
+        else:
+            try:
+                result = instrumented_generate(
+                    engine,
+                    messages,
+                    model=model,
+                    bus=bus,
+                    temperature=req.temperature,
+                    max_tokens=req.max_tokens,
+                    **kwargs,
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger("openjarvis.server").error("Error in instrumented_generate", exc_info=True)
+                result = {"content": f"Error during generation: {exc}", "finish_reason": "stop"}
+    else:
+        try:
             result = engine.generate(
                 messages,
                 model=model,
@@ -367,24 +526,10 @@ def _handle_direct(
                 max_tokens=req.max_tokens,
                 **kwargs,
             )
-        else:
-            result = instrumented_generate(
-                engine,
-                messages,
-                model=model,
-                bus=bus,
-                temperature=req.temperature,
-                max_tokens=req.max_tokens,
-                **kwargs,
-            )
-    else:
-        result = engine.generate(
-            messages,
-            model=model,
-            temperature=req.temperature,
-            max_tokens=req.max_tokens,
-            **kwargs,
-        )
+        except Exception as exc:
+            import logging
+            logging.getLogger("openjarvis.server").error("Error in engine.generate", exc_info=True)
+            result = {"content": f"Error during generation: {exc}", "finish_reason": "stop"}
     content = result.get("content", "")
     usage = result.get("usage", {})
 
@@ -917,6 +1062,14 @@ async def delete_model(model_name: str, request: Request):
     return {"status": "deleted", "model": model_name}
 
 
+@router.get("/v1/cloud/keys")
+async def get_cloud_keys_status():
+    """Return which cloud API keys are set in the server's environment."""
+    import os
+    keys = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"]
+    return {k: bool(os.environ.get(k)) for k in keys}
+
+
 @router.post("/v1/cloud/reload")
 async def reload_cloud_engine(request: Request):
     """Hot-reload cloud API keys and (re-)initialize the cloud engine.
@@ -945,6 +1098,24 @@ async def reload_cloud_engine(request: Request):
                 os.environ[key] = value
             else:
                 os.environ.pop(key, None)
+                
+        # Persist keys to cloud-keys.env for non-desktop clients
+        keys_path = get_config_dir() / "cloud-keys.env"
+        current_keys = {}
+        if keys_path.exists():
+            for raw_line in keys_path.read_text().splitlines():
+                line = raw_line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    current_keys[k.strip()] = v.strip()
+                    
+        for key, value in submitted_keys.items():
+            if value:
+                current_keys[key] = value
+            else:
+                current_keys.pop(key, None)
+                
+        keys_path.write_text("\n".join(f"{k}={v}" for k, v in current_keys.items()) + "\n")
     else:
         # Compatibility fallback for non-desktop/manual configurations.
         keys_path = get_config_dir() / "cloud-keys.env"

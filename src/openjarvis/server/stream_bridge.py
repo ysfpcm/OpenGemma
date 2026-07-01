@@ -243,55 +243,7 @@ class AgentStreamBridge:
             engine = getattr(self._agent, "_engine", None)
             used_real_streaming = False
 
-            if engine is not None and hasattr(engine, "stream_full") and content:
-                # Re-stream using the engine for real token delivery.
-                # Build the same messages the agent used for its final turn.
-                try:
-                    from openjarvis.core.types import Message as MsgType
-                    from openjarvis.core.types import Role as RoleType
-
-                    replay_messages = []
-                    for m in self._request.messages:
-                        role = (
-                            RoleType(m.role)
-                            if m.role in {r.value for r in RoleType}
-                            else RoleType.USER
-                        )
-                        replay_messages.append(
-                            MsgType(
-                                role=role,
-                                content=m.content or "",
-                                name=m.name,
-                                tool_call_id=m.tool_call_id,
-                            )
-                        )
-
-                    async for sc in engine.stream_full(
-                        replay_messages,
-                        model=self._model,
-                    ):
-                        if sc.content:
-                            chunk = ChatCompletionChunk(
-                                id=self._chunk_id,
-                                model=self._model,
-                                choices=[
-                                    StreamChoice(
-                                        delta=DeltaMessage(content=sc.content),
-                                    )
-                                ],
-                            )
-                            yield f"data: {chunk.model_dump_json()}\n\n"
-                    used_real_streaming = True
-                except Exception as stream_exc:
-                    import logging as _logging
-
-                    _logger = _logging.getLogger("openjarvis.server")
-                    _logger.warning(
-                        "Real streaming failed, falling back to word replay: %s",
-                        stream_exc,
-                    )
-
-            # Fallback: word-by-word replay if real streaming was not used
+            # Stream content word-by-word replay
             if not used_real_streaming and content:
                 words = content.split(" ")
                 for i, word in enumerate(words):

@@ -142,4 +142,10 @@ try:
 except ImportError:
     pass
 
+try:
+    import openjarvis.tools.weather_tool  # noqa: F401
+    import openjarvis.tools.traffic_tool  # noqa: F401
+except ImportError:
+    pass
+
 __all__ = ["BaseTool", "ToolExecutor", "ToolSpec"]

@@ -251,7 +251,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     models: [],
     modelsLoading: true,
-    selectedModel: '',
+    selectedModel: loadSettings().defaultModel || '',
     serverInfo: null,
     savings: null,
 
@@ -450,7 +450,13 @@ export const useAppStore = create<AppState>((set, get) => {
           : { models },
       ),
     setModelsLoading: (loading: boolean) => set({ modelsLoading: loading }),
-    setSelectedModel: (model: string) => set({ selectedModel: model }),
+    setSelectedModel: (model: string) => {
+      set({ selectedModel: model });
+      const current = get().settings;
+      const next = { ...current, defaultModel: model };
+      set({ settings: next });
+      saveSettings(next);
+    },
     setServerInfo: (info: ServerInfo | null) => set({ serverInfo: info }),
     setSavings: (data: SavingsData | null) => set({ savings: data }),
     incrementSavings: (usage: TokenUsage) => {
