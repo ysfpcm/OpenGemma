@@ -135,7 +135,6 @@ def _gmail_api_send_message(
 ) -> Dict[str, Any]:
     """Send an email using the Gmail API."""
     import base64
-    import email.utils
     from email.message import EmailMessage
 
     msg = EmailMessage()
@@ -163,7 +162,6 @@ def _gmail_api_create_draft(
 ) -> Dict[str, Any]:
     """Create a draft email using the Gmail API."""
     import base64
-    import email.utils
     from email.message import EmailMessage
 
     msg = EmailMessage()
@@ -397,6 +395,7 @@ def _extract_attachments(token: str, msg_id: str, payload: Dict[str, Any]) -> st
                 try:
                     att_data = _gmail_api_get_attachment(token, msg_id, attachment_id)
                     import io
+
                     import pdfplumber
                     with pdfplumber.open(io.BytesIO(att_data)) as pdf:
                         pdf_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
@@ -787,6 +786,36 @@ class GmailConnector(BaseConnector):
                 },
                 category="communication",
             ),
+            ToolSpec(
+                name="gmail_archive_message",
+                description="Archive an email message (removes it from the INBOX).",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "message_id": {"type": "string", "description": "Gmail message ID to archive"},
+                    },
+                    "required": ["message_id"],
+                },
+                category="communication",
+            ),
+            ToolSpec(
+                name="gmail_trash_message",
+                description="Move an email message to the Trash folder.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "message_id": {"type": "string", "description": "Gmail message ID to move to Trash"},
+                    },
+                    "required": ["message_id"],
+                },
+                category="communication",
+            ),
+            ToolSpec(
+                name="gmail_get_cal_ai_report",
+                description="Search for the latest Cal AI weekly health report email, download the PDF via its link, and return the extracted text content.",
+                parameters={"type": "object", "properties": {}},
+                category="communication",
+            ),
         ]
 
     def execute_mcp_tool(self, name: str, **kwargs: Any) -> Any:
@@ -810,7 +839,7 @@ class GmailConnector(BaseConnector):
                     out.append(f"Thread ID: {msg.get('threadId', m['id'])} | Message ID: {m['id']} | Date: {date} | From: {author} | Subject: {subject}\nSnippet: {msg.get('snippet', '')}")
                 content = "\n\n".join(out) if out else "No emails found matching query."
                 return ToolResult(tool_name=name, content=content, success=True)
-                
+
             elif name == "gmail_get_thread":
                 thread_id = kwargs.get("thread_id", "")
                 try:
@@ -831,7 +860,7 @@ class GmailConnector(BaseConnector):
                     return ToolResult(tool_name=name, content=content, success=True)
                 except Exception as e:
                     return ToolResult(tool_name=name, content=f"Failed to get thread: {e}", success=False)
-                
+
             elif name == "gmail_list_unread":
                 label = kwargs.get("label", "INBOX")
                 max_results = int(kwargs.get("max_results", 20))
@@ -849,7 +878,7 @@ class GmailConnector(BaseConnector):
                     out.append(f"Thread ID: {msg.get('threadId', m['id'])} | Message ID: {m['id']} | Date: {date} | From: {author} | Subject: {subject}\nSnippet: {msg.get('snippet', '')}")
                 content = "\n\n".join(out) if out else "No unread emails found."
                 return ToolResult(tool_name=name, content=content, success=True)
-                
+
             elif name == "gmail_send_email":
                 to = kwargs.get("to", "")
                 subject = kwargs.get("subject", "")
@@ -862,7 +891,7 @@ class GmailConnector(BaseConnector):
                     return ToolResult(tool_name=name, content=f"Successfully sent email. Response: {resp}", success=True)
                 except Exception as e:
                     return ToolResult(tool_name=name, content=f"Failed to send email: {e}", success=False)
-                    
+
             elif name == "gmail_draft_email":
                 to = kwargs.get("to", "")
                 subject = kwargs.get("subject", "")
@@ -875,6 +904,84 @@ class GmailConnector(BaseConnector):
                     return ToolResult(tool_name=name, content=f"Successfully created draft email. Response: {resp}", success=True)
                 except Exception as e:
                     return ToolResult(tool_name=name, content=f"Failed to create draft: {e}", success=False)
+
+            elif name == "gmail_archive_message":
+                message_id = kwargs.get("message_id", "")
+                try:
+                    self.archive_message(message_id)
+                    return ToolResult(tool_name=name, content=f"Successfully archived message: {message_id}", success=True)
+                except Exception as e:
+                    return ToolResult(tool_name=name, content=f"Failed to archive message {message_id}: {e}", success=False)
+
+            elif name == "gmail_trash_message":
+                message_id = kwargs.get("message_id", "")
+                try:
+                    self.delete_message(message_id)
+                    return ToolResult(tool_name=name, content=f"Successfully moved message to trash: {message_id}", success=True)
+                except Exception as e:
+                    return ToolResult(tool_name=name, content=f"Failed to move message to trash {message_id}: {e}", success=False)
+
+            elif name == "gmail_get_cal_ai_report":
+                try:
+                    # 1. Search for Cal AI emails (using from address or Health and Nutrition labels)
+                    query = "from:noreply@mail.calai.app OR label:\"Health and Nutrition\" OR label:health-and-nutrition"
+                    resp = self._call_with_refresh(_gmail_api_list_messages, query=query)
+                    messages = resp.get("messages", [])
+                    if not messages:
+                        return ToolResult(tool_name=name, content="No Cal AI report email found.", success=False)
+
+                    # 2. Get the latest email message body
+                    msg_id = messages[0]["id"]
+                    msg = self._call_with_refresh(_gmail_api_get_message, msg_id)
+                    payload = msg.get("payload", {})
+                    body = _decode_body(payload)
+
+                    # 3. Extract the PDF report URL link
+                    import re
+                    url_match = re.search(r'https://[^\s"\'<>]+report-summary/[a-f0-9-]+', body)
+                    if not url_match:
+                        # Fallback: search for direct storage URLs if present
+                        url_match = re.search(r'https://[^\s"\'<>]+calai-app\.appspot\.com/[^\s"\'<>]+', body)
+
+                    if not url_match:
+                        return ToolResult(tool_name=name, content="Could not find report summary download link in the email body.", success=False)
+
+                    url = url_match.group(0)
+
+                    # 4. Fetch the URL (following redirects manually to verify SSRF at each step)
+                    import httpx
+                    import io
+                    import urllib.parse
+                    from openjarvis.security.ssrf import check_ssrf
+
+                    current_url = url
+                    pdf_bytes = None
+                    for _ in range(6):
+                        ssrf_error = check_ssrf(current_url)
+                        if ssrf_error:
+                            return ToolResult(tool_name=name, content=f"SSRF blocked redirect: {ssrf_error}", success=False)
+
+                        r = httpx.get(current_url, timeout=60.0, follow_redirects=False)
+                        if r.status_code in (301, 302, 303, 307, 308):
+                            loc = r.headers.get("location", "")
+                            current_url = urllib.parse.urljoin(current_url, loc)
+                            continue
+                        r.raise_for_status()
+                        pdf_bytes = r.content
+                        break
+
+                    if pdf_bytes is None:
+                        return ToolResult(tool_name=name, content="Failed to fetch PDF bytes from the redirect chain.", success=False)
+
+                    # 5. Extract PDF text content
+                    import pdfplumber
+                    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                        text = "\n\n".join(p.extract_text() or "" for p in pdf.pages)
+
+                    return ToolResult(tool_name=name, content=text or "No text content found in PDF.", success=True)
+
+                except Exception as exc:
+                    return ToolResult(tool_name=name, content=f"Failed to fetch/parse Cal AI report: {exc}", success=False)
 
             return super().execute_mcp_tool(name, **kwargs)
         except Exception as exc:

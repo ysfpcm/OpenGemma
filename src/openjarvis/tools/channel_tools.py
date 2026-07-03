@@ -28,7 +28,7 @@ class ChannelSendTool(BaseTool):
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name="channel_send",
-            description="Send a message to a channel (Telegram, Discord, Slack, etc.).",
+            description="Send a message to a channel (Telegram, Discord, Slack, etc.). DO NOT use this to reply to the user you are currently talking to. Your normal text output is automatically sent to them as a reply. Only use this tool if you need to proactively initiate a new conversation or send a message to a different contact.",
             parameters={
                 "type": "object",
                 "properties": {

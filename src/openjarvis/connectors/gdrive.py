@@ -452,7 +452,7 @@ class GDriveConnector(BaseConnector):
                 file_id = kwargs.get("file_id", "")
                 # We need to know the mimeType to export it. We can get it from list files with query.
                 resp = call_with_refresh(_gdrive_api_list_files, self._credentials_path, query=f"'{file_id}' in parents") # Just trying to find it, or we can just fetch it directly.
-                # Wait, getting file metadata requires a different API call. 
+                # Wait, getting file metadata requires a different API call.
                 # Let's just try exporting it as plain text first.
                 try:
                     content = call_with_refresh(_gdrive_api_export, self._credentials_path, file_id, "text/plain")
@@ -462,21 +462,22 @@ class GDriveConnector(BaseConnector):
                     try:
                         raw_bytes = call_with_refresh(_gdrive_api_download, self._credentials_path, file_id)
                         import io
+
                         import pdfplumber
                         with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
                             extracted = "\n".join(page.extract_text() or "" for page in pdf.pages)
                         return ToolResult(tool_name=name, content=extracted[:20000], success=True)
                     except Exception as e2:
                         return ToolResult(
-                            tool_name=name, 
-                            content=f"Failed to read file. It might not be a supported document type. Export Error: {e}, Download Error: {e2}", 
+                            tool_name=name,
+                            content=f"Failed to read file. It might not be a supported document type. Export Error: {e}, Download Error: {e2}",
                             success=False
                         )
 
             elif name == "gdrive_list_recent":
                 file_type = kwargs.get("file_type", "")
                 max_results = int(kwargs.get("max_results", 20))
-                
+
                 query = ""
                 if file_type == "document":
                     query = "mimeType='application/vnd.google-apps.document'"
@@ -484,7 +485,7 @@ class GDriveConnector(BaseConnector):
                     query = "mimeType='application/vnd.google-apps.spreadsheet'"
                 elif file_type == "presentation":
                     query = "mimeType='application/vnd.google-apps.presentation'"
-                
+
                 resp = call_with_refresh(_gdrive_api_list_files, self._credentials_path, query=query)
                 files = resp.get("files", [])[:max_results]
                 out = []

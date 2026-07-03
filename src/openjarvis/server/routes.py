@@ -1098,7 +1098,7 @@ async def reload_cloud_engine(request: Request):
                 os.environ[key] = value
             else:
                 os.environ.pop(key, None)
-                
+
         # Persist keys to cloud-keys.env for non-desktop clients
         keys_path = get_config_dir() / "cloud-keys.env"
         current_keys = {}
@@ -1108,13 +1108,13 @@ async def reload_cloud_engine(request: Request):
                 if line and not line.startswith("#") and "=" in line:
                     k, v = line.split("=", 1)
                     current_keys[k.strip()] = v.strip()
-                    
+
         for key, value in submitted_keys.items():
             if value:
                 current_keys[key] = value
             else:
                 current_keys.pop(key, None)
-                
+
         keys_path.write_text("\n".join(f"{k}={v}" for k, v in current_keys.items()) + "\n")
     else:
         # Compatibility fallback for non-desktop/manual configurations.

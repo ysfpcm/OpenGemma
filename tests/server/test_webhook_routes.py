@@ -100,6 +100,28 @@ class TestBlueBubblesWebhook:
             headers={"Authorization": "bb_secret"},
         )
         assert resp.status_code == 200
+        mock_bridge.handle_incoming.assert_called_once_with(
+            "user@icloud.com",
+            "hello from imessage",
+            "bluebubbles",
+        )
+
+    def test_outgoing_bluebubbles_ignored(self, bb_client, mock_bridge):
+        resp = bb_client.post(
+            "/webhooks/bluebubbles",
+            json={
+                "type": "new-message",
+                "data": {
+                    "handle": {"address": "user@icloud.com"},
+                    "text": "hello from assistant",
+                    "guid": "msg-123",
+                    "isFromMe": True,
+                },
+            },
+            headers={"Authorization": "bb_secret"},
+        )
+        assert resp.status_code == 200
+        mock_bridge.handle_incoming.assert_not_called()
 
     def test_wrong_password_rejected(self, bb_client):
         resp = bb_client.post(

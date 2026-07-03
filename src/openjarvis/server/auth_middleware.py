@@ -25,6 +25,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self._api_key = api_key or os.environ.get("OPENJARVIS_API_KEY", "")
 
     async def dispatch(self, request: Request, call_next):  # noqa: ANN001
+        # Allow CORS preflight requests to pass through unauthenticated
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         if self._api_key and self._requires_auth(request.url.path):
             auth = request.headers.get("Authorization", "")
             if not auth:

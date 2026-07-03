@@ -16,6 +16,7 @@ import {
   fetchAgentTraces,
 } from '../../lib/api';
 import type { ManagedAgent, AgentTask, AgentMessage, AgentTemplate, LearningLogEntry, AgentTrace } from '../../lib/api';
+import { DigitalWhiteboard } from './DigitalWhiteboard';
 
 // ---------------------------------------------------------------------------
 // Colors — Catppuccin Mocha
@@ -937,7 +938,7 @@ function LogsTabContent({ apiUrl, agentId }: { apiUrl: string; agentId: string }
 // Detail Panel (tabbed)
 // ---------------------------------------------------------------------------
 
-type DetailTab = 'overview' | 'interact' | 'tasks' | 'memory' | 'learning' | 'logs';
+type DetailTab = 'overview' | 'interact' | 'tasks' | 'memory' | 'learning' | 'logs' | 'whiteboard';
 
 const DETAIL_TABS: { id: DetailTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -983,22 +984,28 @@ function DetailPanel({
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 2, marginBottom: 16, borderBottom: `1px solid ${C.border}`, paddingBottom: 0 }}>
-        {DETAIL_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: '6px 14px', border: 'none', borderRadius: '6px 6px 0 0',
-              background: activeTab === tab.id ? C.surface0 : 'none',
-              color: activeTab === tab.id ? C.text : C.overlay0,
-              cursor: 'pointer', fontSize: 13, fontWeight: activeTab === tab.id ? 600 : 400,
-              borderBottom: activeTab === tab.id ? `2px solid ${C.accent}` : '2px solid transparent',
-              marginBottom: -1,
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {(() => {
+          const tabs = [...DETAIL_TABS];
+          if (agent.agent_type === 'architect') {
+            tabs.push({ id: 'whiteboard', label: 'Whiteboard' });
+          }
+          return tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '6px 14px', border: 'none', borderRadius: '6px 6px 0 0',
+                background: activeTab === tab.id ? C.surface0 : 'none',
+                color: activeTab === tab.id ? C.text : C.overlay0,
+                cursor: 'pointer', fontSize: 13, fontWeight: activeTab === tab.id ? 600 : 400,
+                borderBottom: activeTab === tab.id ? `2px solid ${C.accent}` : '2px solid transparent',
+                marginBottom: -1,
+              }}
+            >
+              {tab.label}
+            </button>
+          ));
+        })()}
       </div>
 
       {/* Tab content */}
@@ -1020,6 +1027,9 @@ function DetailPanel({
         )}
         {activeTab === 'logs' && (
           <LogsTabContent apiUrl={apiUrl} agentId={agent.id} />
+        )}
+        {activeTab === 'whiteboard' && (
+          <DigitalWhiteboard agentId={agent.id} />
         )}
       </div>
     </div>

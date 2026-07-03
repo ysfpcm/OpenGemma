@@ -143,6 +143,10 @@ interface AppState {
   // System panel
   systemPanelOpen: boolean;
 
+  // API reachability
+  apiReachable: boolean | null;
+  setApiReachable: (reachable: boolean | null) => void;
+
   // Opt-in sharing
   optInEnabled: boolean;
   optInDisplayName: string;
@@ -258,8 +262,9 @@ export const useAppStore = create<AppState>((set, get) => {
     settings: loadSettings(),
 
     commandPaletteOpen: false,
-    sidebarOpen: true,
+    sidebarOpen: false,
     systemPanelOpen: true,
+    apiReachable: null,
 
     optInEnabled: localStorage.getItem(OPTIN_KEY) === 'true',
     optInDisplayName: localStorage.getItem(OPTIN_NAME_KEY) || '',
@@ -498,6 +503,7 @@ export const useAppStore = create<AppState>((set, get) => {
     setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
     toggleSystemPanel: () => set((s) => ({ systemPanelOpen: !s.systemPanelOpen })),
     setSystemPanelOpen: (open: boolean) => set({ systemPanelOpen: open }),
+    setApiReachable: (reachable: boolean | null) => set({ apiReachable: reachable }),
 
     // ── Agents ─────────────────────────────────────────────────────
 

@@ -212,7 +212,7 @@ class JarvisSystem:
             )
 
         self.channel_backend = channel_bridge
-        
+
         # Inject channel_bridge into channel tools, or add ChannelSendTool if missing
         has_channel_send = False
         for t in self.tools:
@@ -220,7 +220,7 @@ class JarvisSystem:
                 t._channel = channel_bridge
                 if type(t).__name__ == "ChannelSendTool":
                     has_channel_send = True
-                    
+
         if not has_channel_send:
             from openjarvis.tools.channel_tools import ChannelSendTool
             cst = ChannelSendTool(channel=channel_bridge)

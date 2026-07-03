@@ -58,14 +58,18 @@ class PDFExtractTool(BaseTool):
         return ToolSpec(
             name="pdf_extract",
             description=(
-                "Extract text from a PDF file. Returns the extracted text content."
+                "Extract text from a PDF file (either local file_path or remote URL). Returns the extracted text content."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "Path to the PDF file.",
+                        "description": "Path to the local PDF file.",
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "URL to the remote PDF file to download and extract directly.",
                     },
                     "pages": {
                         "type": "string",
@@ -79,21 +83,96 @@ class PDFExtractTool(BaseTool):
                         "description": ("Maximum characters to return. Default 50000."),
                     },
                 },
-                "required": ["file_path"],
+                "required": [],
             },
             category="media",
-            required_capabilities=["file:read"],
+            required_capabilities=["file:read", "network:fetch"],
         )
 
     def execute(self, **params: Any) -> ToolResult:
         file_path = params.get("file_path", "")
-        if not file_path:
+        url = params.get("url", "")
+        if not file_path and not url:
             return ToolResult(
                 tool_name="pdf_extract",
-                content="No file_path provided.",
+                content="Either 'file_path' or 'url' must be provided.",
                 success=False,
             )
 
+        try:
+            import pdfplumber
+        except ImportError:
+            return ToolResult(
+                tool_name="pdf_extract",
+                content=(
+                    "pdfplumber package not installed."
+                    " Install with: pip install pdfplumber"
+                ),
+                success=False,
+            )
+
+        max_chars = params.get("max_chars", _DEFAULT_MAX_CHARS)
+        pages_param = params.get("pages")
+
+        if url:
+            from openjarvis.security.ssrf import check_ssrf
+            ssrf_error = check_ssrf(url)
+            if ssrf_error:
+                return ToolResult(
+                    tool_name="pdf_extract",
+                    content=f"SSRF protection blocked request: {ssrf_error}",
+                    success=False,
+                )
+
+            import httpx
+            import io
+            try:
+                response = httpx.get(url, timeout=60.0)
+                response.raise_for_status()
+                pdf_bytes = response.content
+            except Exception as e:
+                return ToolResult(
+                    tool_name="pdf_extract",
+                    content=f"Failed to download PDF from URL {url}: {e}",
+                    success=False,
+                )
+
+            try:
+                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                    total_pages = len(pdf.pages)
+                    if pages_param:
+                        page_indices = _parse_pages(pages_param, total_pages)
+                    else:
+                        page_indices = list(range(total_pages))
+
+                    text_parts: list[str] = []
+                    for idx in page_indices:
+                        if 0 <= idx < total_pages:
+                            page_text = pdf.pages[idx].extract_text() or ""
+                            text_parts.append(page_text)
+
+                    text = "\n\n".join(text_parts)
+                    if len(text) > max_chars:
+                        text = text[:max_chars] + "\n\n[Content truncated]"
+
+                    return ToolResult(
+                        tool_name="pdf_extract",
+                        content=text or "No text content found in PDF.",
+                        success=True,
+                        metadata={
+                            "url": url,
+                            "total_pages": total_pages,
+                            "pages_extracted": len(page_indices),
+                        },
+                    )
+            except Exception as exc:
+                return ToolResult(
+                    tool_name="pdf_extract",
+                    content=f"PDF extraction error: {exc}",
+                    success=False,
+                )
+
+        # Local file path extraction
         path = Path(file_path)
 
         # Validate extension
@@ -122,21 +201,6 @@ class PDFExtractTool(BaseTool):
             )
 
         try:
-            import pdfplumber
-        except ImportError:
-            return ToolResult(
-                tool_name="pdf_extract",
-                content=(
-                    "pdfplumber package not installed."
-                    " Install with: pip install pdfplumber"
-                ),
-                success=False,
-            )
-
-        max_chars = params.get("max_chars", _DEFAULT_MAX_CHARS)
-        pages_param = params.get("pages")
-
-        try:
             with pdfplumber.open(str(path)) as pdf:
                 total_pages = len(pdf.pages)
 
@@ -145,7 +209,7 @@ class PDFExtractTool(BaseTool):
                 else:
                     page_indices = list(range(total_pages))
 
-                text_parts: list[str] = []
+                text_parts = []
                 for idx in page_indices:
                     if 0 <= idx < total_pages:
                         page_text = pdf.pages[idx].extract_text() or ""

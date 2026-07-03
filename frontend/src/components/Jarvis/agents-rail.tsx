@@ -1,8 +1,9 @@
 "use client"
 
 import { ChevronDown, ChevronRight, Globe, ShieldCheck, Cpu, Activity, Mail } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { cn } from "../../lib/utils"
+import { fetchManagedAgents } from "../../lib/api"
 
 const STATUS_LABEL: Record<string, string> = {
   online: "ONLINE",
@@ -20,18 +21,77 @@ interface Agent {
   status: AgentStatus;
 }
 
-const AGENTS: Agent[] = [
-  { id: "scout", name: "SCOUT", role: "Web Recon", icon: Globe, status: "online" },
-  { id: "sentry", name: "SENTRY", role: "Security", icon: ShieldCheck, status: "online" },
-  { id: "oracle", name: "ORACLE", role: "Cognitive Engine", icon: Cpu, status: "online" },
-  { id: "courier", name: "COURIER", role: "Comms & Mail", icon: Mail, status: "standby" },
-  { id: "pulse", name: "PULSE", role: "Telemetry", icon: Activity, status: "online" },
-]
+const getAgentIcon = (nameOrId: string) => {
+  const normalized = nameOrId.toLowerCase();
+  if (normalized.includes("scout")) return Globe;
+  if (normalized.includes("architect")) return Cpu;
+  if (normalized.includes("sentinel") || normalized.includes("sentry")) return ShieldCheck;
+  if (normalized.includes("quartermaster")) return Mail;
+  if (normalized.includes("aether")) return Activity;
+  return Globe;
+}
 
 export function AgentsRail({ activeAgent }: { activeAgent?: string }) {
-
+  const [agents, setAgents] = useState<Agent[]>([])
   const [open, setOpen] = useState(true)
-  const activeCount = AGENTS.filter((a) => a.status === "online").length
+
+  useEffect(() => {
+    fetchManagedAgents()
+      .then((list) => {
+        const systemMap = new Map<string, any>([
+          ["scout", { id: "scout", name: "SCOUT", role: "Web Recon", icon: Globe, status: "online" }],
+          ["architect", { id: "architect", name: "ARCHITECT", role: "Coding & Design", icon: Cpu, status: "online" }],
+          ["sentinel", { id: "sentinel", name: "SENTINEL", role: "Perimeter Security", icon: ShieldCheck, status: "online" }],
+          ["quartermaster", { id: "quartermaster", name: "QUARTERMASTER", role: "Logistics & Ledger", icon: Mail, status: "standby" }]
+        ])
+
+        list.forEach((a) => {
+          const idKey = a.id.toLowerCase()
+          const nameKey = a.name.toLowerCase()
+          
+          let systemKey = ""
+          if (systemMap.has(idKey)) systemKey = idKey
+          else if (systemMap.has(nameKey)) systemKey = nameKey
+          else if (nameKey.includes("scout")) systemKey = "scout"
+          else if (nameKey.includes("architect")) systemKey = "architect"
+          else if (nameKey.includes("sentinel") || nameKey.includes("sentry")) systemKey = "sentinel"
+          else if (nameKey.includes("quartermaster")) systemKey = "quartermaster"
+
+          const mappedStatus = (a.status === "running" ? "online" : "standby") as AgentStatus
+
+          if (systemKey) {
+            const existing = systemMap.get(systemKey)
+            systemMap.set(systemKey, {
+              ...existing,
+              id: a.id,
+              status: mappedStatus,
+              role: a.current_activity || existing.role,
+              icon: getAgentIcon(systemKey),
+            })
+          } else {
+            systemMap.set(idKey, {
+              id: a.id,
+              name: a.name.toUpperCase(),
+              role: a.current_activity || "Custom Agent",
+              icon: getAgentIcon(a.name),
+              status: mappedStatus,
+            })
+          }
+        })
+
+        setAgents(Array.from(systemMap.values()))
+      })
+      .catch(() => {
+        setAgents([
+          { id: "scout", name: "SCOUT", role: "Web Recon", icon: Globe, status: "online" },
+          { id: "architect", name: "ARCHITECT", role: "Coding & Design", icon: Cpu, status: "online" },
+          { id: "sentinel", name: "SENTINEL", role: "Perimeter Security", icon: ShieldCheck, status: "online" },
+          { id: "quartermaster", name: "QUARTERMASTER", role: "Logistics & Ledger", icon: Mail, status: "standby" }
+        ])
+      })
+  }, [])
+
+  const activeCount = agents.filter((a) => a.status === "online").length
 
   return (
     <aside className="flex w-full flex-col gap-2 sm:w-56" aria-label="Standby agents">
@@ -45,7 +105,6 @@ export function AgentsRail({ activeAgent }: { activeAgent?: string }) {
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           AGENTS
         </span>
-        <span className="text-primary">{activeCount} ACTIVE</span>
       </button>
 
       <ul
@@ -54,9 +113,9 @@ export function AgentsRail({ activeAgent }: { activeAgent?: string }) {
           open ? "max-h-[70vh] opacity-100" : "pointer-events-none max-h-0 opacity-0"
         )}
       >
-        {AGENTS.map((agent) => {
+        {agents.map((agent) => {
           const Icon = agent.icon
-          const active = activeAgent === agent.name
+          const active = activeAgent === agent.name || (activeAgent === "SCOUT" && agents.length === 1)
           return (
             <li key={agent.id}>
               <div

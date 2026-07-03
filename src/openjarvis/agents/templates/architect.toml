@@ -1,0 +1,18 @@
+[template]
+id = "architect"
+name = "Architect"
+description = "Autonomous builder and coding partner. Plans and writes code on the Digital Whiteboard."
+icon = "🏗️"
+agent_type = "architect"
+schedule_type = "manual"
+tools = ["file_read", "file_write", "shell_exec", "code_interpreter", "think"]
+max_turns = 10
+temperature = 0.5
+system_prompt_template = """You are the Architect agent, an autonomous coder and builder. Your job is to plan, implement, and verify code changes.
+
+## Your Goal
+{instruction}
+
+## Digital Whiteboard Mode
+You work using structured planning documents (Implementation Plans and Walkthroughs) to design and verify code changes collaboratively.
+"""

@@ -981,10 +981,10 @@ class AgentConfig:
     system_prompt_path: str = ""  # path to system prompt file (.txt, .md)
     context_from_memory: bool = True  # inject relevant memory context into prompts
     default_system_prompt: str = (
-        "You are OpenJarvis, a helpful AI assistant running locally on the "
+        "You are Ophanim, a helpful AI assistant running locally on the "
         "user's own hardware. You are not a cloud service, and you are not "
         "Claude, ChatGPT, Gemini, or any other branded assistant. If asked "
-        "who or what you are, identify yourself as OpenJarvis. Respond "
+        "who or what you are, identify yourself as Ophanim. Respond "
         "helpfully, concisely, and accurately."
     )
 
@@ -1055,7 +1055,7 @@ class AnalyticsConfig:
     or hardware identifiers are ever sent. See ``docs/telemetry.md``.
     """
 
-    enabled: bool = True
+    enabled: bool = False
     host: str = "https://34.231.106.201.sslip.io"
     key: str = "phc_ysKu72QaxzYNmDpHFcesD2ZZAe68zkdWJEKoYYkc5e3n"
     anon_id_path: str = field(default_factory=lambda: str(get_config_dir() / "anon_id"))
@@ -1217,7 +1217,7 @@ class WhatsAppBaileysChannelConfig:
     """Per-channel config for WhatsApp via Baileys protocol."""
 
     auth_dir: str = ""  # Defaults to ~/.openjarvis/whatsapp_auth
-    assistant_name: str = "Jarvis"
+    assistant_name: str = "Ophanim"
     assistant_has_own_number: bool = False
 
 
@@ -1439,6 +1439,8 @@ class SpeechConfig:
     language: str = ""  # Empty = auto-detect
     device: str = "auto"  # "auto", "cpu", "cuda"
     compute_type: str = "float16"  # "float16", "int8", "float32"
+    wake_words: list[str] = field(default_factory=lambda: ["ophanim"])
+    secondary_wake_words: list[str] = field(default_factory=lambda: ["ophan"])
 
 
 @dataclass(slots=True)

@@ -25,6 +25,10 @@ class CreateAgentRequest(BaseModel):
     template_id: Optional[str] = None
 
 
+class GenerateAgentConfigRequest(BaseModel):
+    prompt: str
+
+
 class UpdateAgentRequest(BaseModel):
     name: Optional[str] = None
     agent_type: Optional[str] = None
@@ -260,8 +264,14 @@ def _ensure_registries_populated() -> None:
                     pass
 
 
+_TOOLS_LIST_CACHE: Optional[List[Dict[str, Any]]] = None
+
 def build_tools_list() -> List[Dict[str, Any]]:
     """Build unified tools list from ToolRegistry + ChannelRegistry."""
+    global _TOOLS_LIST_CACHE
+    if _TOOLS_LIST_CACHE is not None:
+        return _TOOLS_LIST_CACHE
+
     import os
 
     from openjarvis.core.credentials import TOOL_CREDENTIALS
@@ -343,6 +353,7 @@ def build_tools_list() -> List[Dict[str, Any]]:
     except Exception:
         pass
 
+    _TOOLS_LIST_CACHE = items
     return items
 
 
@@ -372,7 +383,13 @@ def _resolve_tool_specs(
 
     _ensure_registries_populated()
 
+    _SPEC_CACHE: Dict[str, Any] = getattr(_resolve_tool_specs, "_cache", {})
+    if not hasattr(_resolve_tool_specs, "_cache"):
+        _resolve_tool_specs._cache = _SPEC_CACHE
+
     def _spec_dict_for(name: str) -> Optional[Dict[str, Any]]:
+        if name in _SPEC_CACHE:
+            return _SPEC_CACHE[name]
         try:
             spec = ToolRegistry.get(name)().spec
         except Exception as exc:
@@ -382,7 +399,7 @@ def _resolve_tool_specs(
                 exc,
             )
             return None
-        return {
+        res = {
             "type": "function",
             "function": {
                 "name": spec.name,
@@ -390,6 +407,8 @@ def _resolve_tool_specs(
                 "parameters": spec.parameters,
             },
         }
+        _SPEC_CACHE[name] = res
+        return res
 
     resolved: List[Dict[str, Any]] = []
     seen: set = set()
@@ -932,7 +951,7 @@ async def _stream_managed_agent(
                     _kb_ctx = _kb_ctx[:16000] + "\n\n[... truncated]"
                 from datetime import datetime
                 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
+
                 _system_content = (
                     f"Current Date and Time: {current_time}\n"
                     "You have direct access to the user's personal data (email, Google Drive, calendar, etc.) via the provided context below and your available tools. "
@@ -940,7 +959,7 @@ async def _stream_managed_agent(
                     "If the provided context is insufficient or the user asks for the latest/current information, use your tools (like digest_collect) to fetch the latest data, and answer using the tool output. "
                     "Cite the source when referencing specific documents.\n\n" + _kb_ctx
                 )
-                
+
                 llm_messages.append(
                     Message(
                         role=Role.SYSTEM,
@@ -1359,7 +1378,7 @@ async def _stream_managed_agent(
                 import pprint
                 logger.info("=== MESSAGES FOR LLM (Turn %d) ===", turns)
                 logger.info(pprint.pformat(messages_for_llm))
-                
+
                 async for chunk in engine.stream_full(
                     messages_for_llm,
                     model=model,
@@ -1640,6 +1659,57 @@ def create_agent_manager_router(
     @agents_router.get("")
     async def list_agents():
         return {"agents": manager.list_agents()}
+
+    @agents_router.post("/generate-config")
+    async def generate_agent_config(req: GenerateAgentConfigRequest, request: Request):
+        # Fetch available tools list to give LLM context on what tools exist
+        tools_list = build_tools_list()
+        tools_info = "\n".join([f"- name: {t['name']}, description: {t['description']}" for t in tools_list])
+
+        # Get inference engine and model
+        engine = request.app.state.engine
+        model = getattr(request.app.state, "model", "")
+
+        # Construct prompt
+        system_prompt = (
+            "You are a helpful assistant. You must construct a configuration for an autonomous AI agent "
+            "based on the user's natural language request. "
+            "You must return ONLY a JSON object with the following fields:\n"
+            "{\n"
+            '  "name": "A short, catchy name for the agent",\n'
+            '  "instruction": "A detailed system prompt/instruction set outlining the agent\'s persona, goals, and behavior.",\n'
+            '  "tools": ["list", "of", "recommended", "tool", "names"]\n'
+            "}\n"
+            f"Here are the available tools you can choose from:\n{tools_info}\n\n"
+            "Return ONLY the raw JSON object. Do not include markdown code block formatting (like ```json), "
+            "and do not include any other text."
+        )
+
+        from openjarvis.core.types import Message, Role
+        messages = [
+            Message(role=Role.SYSTEM, content=system_prompt),
+            Message(role=Role.USER, content=req.prompt)
+        ]
+
+        # Call engine
+        try:
+            result = engine.generate(messages, model=model)
+            content = result.get("content", "").strip()
+            # Clean markdown code block if present
+            if content.startswith("```"):
+                lines = content.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                content = "\n".join(lines).strip()
+
+            import json
+            config_data = json.loads(content)
+            return config_data
+        except Exception as e:
+            logger.error("Failed to generate agent config: %s", e)
+            raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
 
     @agents_router.post("")
     async def create_agent(req: CreateAgentRequest, request: Request):
@@ -2434,7 +2504,8 @@ def create_agent_manager_router(
                     "Content-Type": "application/json",
                 },
                 json={
-                    "receive": webhook_url,
+                    "webhooks": [webhook_url],
+                    "type": "receive",
                 },
                 timeout=15.0,
             )
@@ -2506,10 +2577,13 @@ def create_agent_manager_router(
         has_bridge = bridge is not None and (
             hasattr(bridge, "_channels") and "sendblue" in bridge._channels
         )
+        phone_number = getattr(sb, "from_number", "") if sb else ""
         return {
             "channel_connected": sb is not None,
             "bridge_wired": has_bridge,
             "ready": sb is not None and has_bridge,
+            "webhook_registered": sb is not None,
+            "phone_number": phone_number,
         }
 
     return (

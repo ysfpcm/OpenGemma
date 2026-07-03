@@ -253,3 +253,59 @@ class GmailIMAPConnector(BaseConnector):
                 category="communication",
             ),
         ]
+
+    def execute_mcp_tool(self, name: str, **kwargs: Any) -> Any:
+        em, pw = self._resolve_credentials()
+        if not em or not pw:
+            return "Gmail IMAP connector is not authenticated."
+
+        import email as email_lib
+        import imaplib
+
+        imap = imaplib.IMAP4_SSL(self._imap_host)
+        try:
+            imap.login(em, pw)
+            imap.select("INBOX", readonly=True)
+
+            if name == "gmail_search_emails":
+                query = kwargs.get("query", "")
+                status, data = imap.search(None, f'TEXT "{query}"')
+                if status != "OK" or not data[0]:
+                    return f"No emails found matching '{query}'"
+                msg_ids = data[0].split()
+                msg_ids = list(reversed(msg_ids))[:10]
+
+            elif name == "gmail_list_unread":
+                max_results = kwargs.get("max_results", 10)
+                status, data = imap.search(None, "UNSEEN")
+                if status != "OK" or not data[0]:
+                    return "No unread emails found."
+                msg_ids = data[0].split()
+                msg_ids = list(reversed(msg_ids))[:max_results]
+            else:
+                return f"Tool {name} not supported by gmail_imap."
+
+            out = []
+            for mid in msg_ids:
+                try:
+                    _, msg_data = imap.fetch(mid, "(RFC822)")
+                    raw = msg_data[0][1]
+                    msg = email_lib.message_from_bytes(raw)
+                    subject = _decode_subject(msg.get("Subject", ""))
+                    sender = msg.get("From", "")
+                    date_str = msg.get("Date", "")
+                    body = _extract_text_body(msg)
+                    snippet = body[:1500].strip()
+                    out.append(
+                        f"From: {sender}\nDate: {date_str}\nSubject: {subject}\nBody:\n{snippet}"
+                    )
+                except Exception:
+                    continue
+
+            imap.logout()
+            return "\n\n---\n\n".join(out) if out else "No matching emails found."
+
+        except Exception as e:
+            logger.error("Gmail IMAP tool error: %s", e)
+            return f"Error executing {name}: {e}"
+

@@ -122,7 +122,7 @@ class TelegramChannel(BaseChannel):
             chat_id = channel or conversation_id
             if not chat_id and self._allowed_chat_ids:
                 chat_id = self._allowed_chat_ids.split(",")[0].strip()
-                
+
             reply_to = conversation_id if (channel and conversation_id) else ""
             chunks = textwrap.wrap(
                 content,

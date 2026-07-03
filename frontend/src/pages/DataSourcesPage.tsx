@@ -507,17 +507,35 @@ function SyncStatusDisplay({
     const rangeLabel = backlogRange ?? 'building corpus';
     return (
       <div>
-        <div style={{ fontSize: 11, color: 'var(--color-warning)', marginBottom: 4 }}>
-          Indexed{' '}
-          <span key={totalIndexed} className="sync-bump">
-            {totalIndexed.toLocaleString()} {unitLabel}
-          </span>{' '}
-          <span style={{ color: 'var(--color-text-tertiary)' }}>
-            ({rangeLabel})
-          </span>{' '}
-          <span style={{ color: 'var(--color-text-tertiary)' }}>
-            · Still indexing…
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--color-warning)' }}>
+            Indexed{' '}
+            <span key={totalIndexed} className="sync-bump">
+              {totalIndexed.toLocaleString()} {unitLabel}
+            </span>{' '}
+            <span style={{ color: 'var(--color-text-tertiary)' }}>
+              ({rangeLabel})
+            </span>
+          </div>
+          <button
+            disabled
+            style={{
+              fontSize: 10, padding: '2px 10px',
+              background: 'color-mix(in srgb, var(--color-warning) 15%, transparent)',
+              color: 'var(--color-warning)',
+              border: '1px solid color-mix(in srgb, var(--color-warning) 30%, transparent)',
+              borderRadius: 3, cursor: 'default',
+              display: 'flex', alignItems: 'center', gap: 5,
+              fontWeight: 600,
+            }}
+          >
+            <div className="animate-spin" style={{
+              width: 8, height: 8, borderRadius: '50%',
+              border: '1.5px solid var(--color-warning)',
+              borderTopColor: 'transparent',
+            }} />
+            Syncing...
+          </button>
         </div>
         <div style={{ fontSize: 10.5, color: 'var(--color-text-tertiary)' }}>
           Deep Research available now · results improve as more {unitLabel} are indexed
@@ -553,13 +571,13 @@ function SyncStatusDisplay({
             onClick={handleSync}
             disabled={syncing}
             style={{
-              fontSize: 9, padding: '1px 6px',
-              background: 'transparent',
-              color: 'var(--color-text-tertiary)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 3, cursor: 'pointer',
+              fontSize: 10, padding: '2px 10px',
+              background: 'var(--color-accent-purple)', color: 'var(--color-on-accent)',
+              border: 'none', borderRadius: 3,
+              cursor: 'pointer', fontWeight: 600,
+              opacity: syncing ? 0.5 : 1,
             }}
-          >{syncing ? '...' : 'Re-sync'}</button>
+          >{syncing ? 'Syncing...' : 'Sync'}</button>
         </div>
         {syncError && (
           <div style={{ fontSize: 11, color: 'var(--color-error)', marginTop: 4 }}>
@@ -1097,7 +1115,7 @@ function SendBlueSection({
     if (!webhookUrl.trim()) return;
     setWebhookStatus('registering');
     try {
-      const url = webhookUrl.trim().replace(/\/+$/, '') + '/v1/channels/sendblue/webhook';
+      const url = webhookUrl.trim().replace(/\/+$/, '') + '/webhooks/sendblue';
       await sendblueRegisterWebhook(apiKey.trim(), apiSecret.trim(), url);
       setWebhookStatus('done');
     } catch {
@@ -1274,15 +1292,15 @@ function SendBlueSection({
     setError('');
     try {
       await bindAgentChannel(agentId, 'sendblue', {
-        api_key: apiKey.trim(),
-        api_secret: apiSecret.trim(),
-        phone_number: phone.trim(),
+        api_key_id: apiKey.trim(),
+        api_secret_key: apiSecret.trim(),
+        from_number: phone.trim(),
       });
       // If webhook was registered in the wizard, that's already done.
       // If not, try a best-effort registration with the provided URL.
       if (webhookUrl.trim() && webhookStatus !== 'done') {
         try {
-          const url = webhookUrl.trim().replace(/\/+$/, '') + '/v1/channels/sendblue/webhook';
+          const url = webhookUrl.trim().replace(/\/+$/, '') + '/webhooks/sendblue';
           await sendblueRegisterWebhook(apiKey.trim(), apiSecret.trim(), url);
         } catch { /* */ }
       }

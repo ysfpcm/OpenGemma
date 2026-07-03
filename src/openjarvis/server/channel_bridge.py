@@ -244,16 +244,17 @@ class ChannelBridge:
         # Build context from conversation history
         session = self._session_store.get_or_create(sender_id, channel_type)
         history = session.get("conversation_history", [])
-        context_lines = []
+        
+        from openjarvis.core.types import Message, Role
+        prior_msgs = []
         for msg in history[:-1]:  # exclude the message we just appended
-            context_lines.append(f"{msg['role']}: {msg['content']}")
-        context_str = "\n".join(context_lines)
+            try:
+                role = Role(msg['role'])
+            except ValueError:
+                role = Role.USER
+            prior_msgs.append(Message(role=role, content=msg['content']))
 
         query = content
-        if context_str:
-            query = (
-                f"Previous conversation:\n{context_str}\n\nCurrent message: {content}"
-            )
 
         # Try DeepResearchAgent first
         if self._deep_research_agent is not None:
@@ -265,7 +266,27 @@ class ChannelBridge:
                 response_text = f"Research error: {exc}"
         elif self._system is not None:
             try:
-                result = self._system.ask(query)
+                agent_id = getattr(self._system, "agent_name", "orchestrator")
+                if not agent_id or agent_id == "none":
+                    agent_id = "orchestrator"
+                    
+                tool_names = None
+                sys_prompt = None
+                if self._agent_manager:
+                    agent_data = self._agent_manager.get_agent(agent_id)
+                    if agent_data and "config" in agent_data:
+                        tool_names = agent_data["config"].get("tools")
+                        if isinstance(tool_names, str):
+                            tool_names = [t.strip() for t in tool_names.split(",") if t.strip()]
+                        sys_prompt = agent_data["config"].get("system_prompt")
+
+                result = self._system.ask(
+                    query,
+                    agent=agent_id,
+                    tools=tool_names,
+                    system_prompt=sys_prompt,
+                    prior_messages=prior_msgs,
+                )
                 response_text = result.get("content", str(result))
             except Exception:
                 logger.exception("Error in JarvisSystem.ask()")

@@ -17,11 +17,49 @@ import { toast } from "sonner"
 
 type AssistantState = "idle" | "listening" | "processing" | "responding"
 
+function AudioVisualizer({ state }: { state: AssistantState }) {
+  const active = state !== "idle"
+  const isListening = state === "listening" || state === "processing"
+  
+  return (
+    <AnimatePresence>
+      {active && (
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 10 }}
+          className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-end justify-center gap-1.5 h-10 px-6 py-2 rounded-full glass border border-primary/20 backdrop-blur-md"
+        >
+          {[...Array(32)].map((_, i) => (
+            <motion.div
+              key={i}
+              animate={{
+                height: isListening 
+                  ? ["15%", `${Math.random() * 60 + 40}%`, "15%"] 
+                  : ["15%", "25%", "15%"],
+                opacity: isListening ? [0.5, 1, 0.5] : 0.4
+              }}
+              transition={{
+                repeat: Infinity,
+                duration: isListening ? 0.3 + Math.random() * 0.2 : 2,
+                ease: "easeInOut",
+                delay: Math.random() * 0.5
+              }}
+              className="w-1 rounded-t-md bg-primary shadow-[0_0_8px_var(--color-primary)]"
+            />
+          ))}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
 export function JarvisInterface() {
   const messages = useAppStore((s) => s.messages)
   const activeId = useAppStore((s) => s.activeId)
   const selectedModel = useAppStore((s) => s.selectedModel)
   const streamState = useAppStore((s) => s.streamState)
+  const apiReachable = useAppStore((s) => s.apiReachable)
   const speechEnabled = useAppStore((s) => s.settings.speechEnabled)
   const maxTokens = useAppStore((s) => s.settings.maxTokens)
   const temperature = useAppStore((s) => s.settings.temperature)
@@ -37,6 +75,7 @@ export function JarvisInterface() {
   const [state, setState] = useState<AssistantState>("idle")
   const [lastQuery, setLastQuery] = useState("")
   const [isMinimized, setIsMinimized] = useState(false)
+  const [isTaskbarVisible, setIsTaskbarVisible] = useState(false)
 
   const [voiceTtsEnabled, setVoiceTtsEnabled] = useState(true)
   const voiceTtsEnabledRef = useRef(voiceTtsEnabled)
@@ -62,6 +101,17 @@ export function JarvisInterface() {
   const lastAssistantMessage = [...messages]
     .reverse()
     .find((m) => m.role === "assistant")
+
+  const getActiveAgentName = () => {
+    if (!lastAssistantMessage) return "SCOUT"
+    if (lastAssistantMessage.isResearch) return "ORACLE"
+    const text = lastAssistantMessage.content.toUpperCase()
+    if (text.includes("ARCHITECT")) return "ARCHITECT"
+    if (text.includes("SENTINEL")) return "SENTINEL"
+    if (text.includes("QUARTERMASTER")) return "QUARTERMASTER"
+    if (text.includes("SCOUT")) return "SCOUT"
+    return "SCOUT"
+  }
 
   // Sync state with streaming and speech recording
   useEffect(() => {
@@ -425,7 +475,7 @@ export function JarvisInterface() {
   return (
     <main 
       ref={constraintsRef}
-      className="dark relative h-full w-full overflow-hidden bg-background grid-bg text-foreground"
+      className="dark relative h-full w-full overflow-hidden bg-background text-foreground"
       onClick={() => {
         if (state === "responding" && lastAssistantMessage) {
           setIsMinimized(true)
@@ -434,14 +484,18 @@ export function JarvisInterface() {
     >
       {/* 3D Core Layer */}
 
-      <div
-        className="absolute inset-0 z-0 scan-line transition-transform duration-700 ease-out"
+      <motion.div
+        layout
+        className="absolute z-0 scan-line"
         style={{
-          transform: responding ? "translateY(-26%) scale(0.5)" : "translateY(0) scale(1)",
+          inset: 0,
+          width: "100%",
+          height: "100%",
         }}
+        transition={{ type: "spring", stiffness: 100, damping: 20 }}
       >
-        <CoreCanvas intensity={intensity} />
-      </div>
+        <CoreCanvas intensity={intensity} apiReachable={apiReachable} state={state} />
+      </motion.div>
 
       {/* Vignette */}
       <div
@@ -456,7 +510,7 @@ export function JarvisInterface() {
       {/* Status Line */}
       <div
         className={cn(
-          "pointer-events-none absolute left-1/2 top-[58%] z-20 -translate-x-1/2 text-center transition-opacity duration-500",
+          "pointer-events-none absolute left-1/2 bottom-32 z-20 -translate-x-1/2 text-center transition-opacity duration-500",
           responding ? "opacity-0" : "opacity-100"
         )}
       >
@@ -501,6 +555,7 @@ export function JarvisInterface() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="glass-strong h-[60vh] w-full overflow-y-auto rounded-2xl p-5 sm:p-6 shadow-[0_0_30px_rgba(0,255,255,0.05)] border border-primary/20 backdrop-blur-xl relative">
+              <AudioVisualizer state={state} />
               <InfoPanel messages={messages} onSendMessage={sendMessage} busy={false} />
               
               {/* Close / Minimize Button */}
@@ -547,21 +602,54 @@ export function JarvisInterface() {
 
       {/* Left-docked Agents Rail */}
       <div className="absolute left-4 top-44 z-30 hidden lg:block">
-        <AgentsRail activeAgent={lastAssistantMessage?.isResearch ? "ORACLE" : "SCOUT"} />
+        <AgentsRail activeAgent={getActiveAgentName()} />
       </div>
 
-      {/* Bottom Command Bar */}
-      <div className="absolute inset-x-0 bottom-8 z-30 flex justify-center px-4">
-        <VoiceBar
-          supported={speechAvailable}
-          listening={speechState === "recording"}
-          interim=""
-          busy={busy}
-          onToggleMic={toggleMic}
-          onSubmit={sendMessage}
-          ttsEnabled={voiceTtsEnabled}
-          onToggleTts={() => setVoiceTtsEnabled(!voiceTtsEnabled)}
-        />
+      {/* Bottom Command Bar / Taskbar */}
+      <div className="absolute inset-x-0 bottom-8 z-30 flex flex-col items-center justify-center px-4">
+        <AnimatePresence mode="wait">
+          {isTaskbarVisible ? (
+            <motion.div
+              key="taskbar"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="w-full flex flex-col items-center relative"
+            >
+              <button 
+                onClick={() => setIsTaskbarVisible(false)}
+                className="mb-2 text-muted-foreground hover:text-primary transition-colors"
+                title="Hide Taskbar"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <VoiceBar
+                supported={speechAvailable}
+                listening={speechState === "recording"}
+                interim=""
+                busy={busy}
+                onToggleMic={toggleMic}
+                onSubmit={sendMessage}
+                ttsEnabled={voiceTtsEnabled}
+                onToggleTts={() => setVoiceTtsEnabled(!voiceTtsEnabled)}
+              />
+            </motion.div>
+          ) : (
+            <motion.button
+              key="toggle"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              onClick={() => setIsTaskbarVisible(true)}
+              className="glass-strong flex h-10 px-6 items-center justify-center rounded-full border border-primary/30 text-primary transition-colors hover:bg-primary/10 shadow-[0_0_15px_rgba(0,255,255,0.1)] backdrop-blur-md"
+            >
+              <span className="font-mono text-xs tracking-widest flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+                OPEN TASKBAR
+              </span>
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
     </main>
   )

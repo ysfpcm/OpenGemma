@@ -19,6 +19,7 @@ from openjarvis.server.digest_routes import create_digest_router
 from openjarvis.server.research_router import router as research_router
 from openjarvis.server.routes import router
 from openjarvis.server.upload_router import router as upload_router
+from openjarvis.server.system_metrics_routes import router as system_metrics_router
 
 logger = logging.getLogger(__name__)
 
@@ -68,27 +69,7 @@ def _restore_sendblue_bindings(app: FastAPI) -> None:
                     from openjarvis.server.session_store import SessionStore
 
                     session_store = SessionStore()
-                    engine = getattr(app.state, "engine", None)
                     dr_agent = None
-                    if engine:
-                        from openjarvis.server.agent_manager_routes import (
-                            _build_deep_research_tools,
-                        )
-
-                        tools = _build_deep_research_tools(engine=engine, model="")
-                        if tools:
-                            from openjarvis.agents.deep_research import (
-                                DeepResearchAgent,
-                            )
-
-                            model_name = getattr(app.state, "model", "") or getattr(
-                                engine, "_model", ""
-                            )
-                            dr_agent = DeepResearchAgent(
-                                engine=engine,
-                                model=model_name,
-                                tools=tools,
-                            )
 
                     bus = getattr(app.state, "bus", None)
                     if bus is None:
@@ -102,6 +83,7 @@ def _restore_sendblue_bindings(app: FastAPI) -> None:
                         bus=bus,
                         agent_manager=mgr,
                         deep_research_agent=dr_agent,
+                        system=getattr(app.state, "agent", None),
                     )
 
                 logger.info(
@@ -314,6 +296,7 @@ def create_app(
     app.include_router(upload_router)
     app.include_router(research_router)
     app.include_router(analytics_router)
+    app.include_router(system_metrics_router)
     include_all_routes(app)
 
     # Restore SendBlue channel bindings from database on startup
@@ -339,22 +322,22 @@ def create_app(
             logger.debug("Auth middleware init skipped: %s", exc)
 
     # Mount webhook routes (always — SendBlue may be configured dynamically)
-    if webhook_config:
-        try:
-            from openjarvis.server.webhook_routes import (
-                create_webhook_router,
-            )
+    try:
+        from openjarvis.server.webhook_routes import (
+            create_webhook_router,
+        )
 
-            webhook_router = create_webhook_router(
-                bridge=channel_bridge,
-                twilio_auth_token=webhook_config.get("twilio_auth_token", ""),
-                bluebubbles_password=webhook_config.get("bluebubbles_password", ""),
-                whatsapp_verify_token=webhook_config.get("whatsapp_verify_token", ""),
-                whatsapp_app_secret=webhook_config.get("whatsapp_app_secret", ""),
-            )
-            app.include_router(webhook_router)
-        except Exception as exc:
-            logger.debug("Webhook routes init skipped: %s", exc)
+        webhook_config = webhook_config or {}
+        webhook_router = create_webhook_router(
+            bridge=getattr(app.state, "channel_bridge", None),
+            twilio_auth_token=webhook_config.get("twilio_auth_token", ""),
+            bluebubbles_password=webhook_config.get("bluebubbles_password", ""),
+            whatsapp_verify_token=webhook_config.get("whatsapp_verify_token", ""),
+            whatsapp_app_secret=webhook_config.get("whatsapp_app_secret", ""),
+        )
+        app.include_router(webhook_router)
+    except Exception as exc:
+        logger.debug("Webhook routes init skipped: %s", exc)
 
     # Serve static frontend assets if the static/ directory exists
     static_dir = pathlib.Path(__file__).parent / "static"

@@ -279,6 +279,9 @@ def create_webhook_router(
             return Response("OK", status_code=200)
 
         data = payload.get("data", {})
+        if data.get("isFromMe") or data.get("is_from_me"):
+            return Response("OK", status_code=200)
+
         handle = data.get("handle", {})
         sender = handle.get("address", "")
         text = data.get("text", "")
@@ -370,16 +373,15 @@ def create_webhook_router(
         # Get the SendBlue channel — may be passed at init or set later
         sb = sendblue_channel or getattr(request.app.state, "sendblue_channel", None)
 
-        # Fail closed: require a configured channel + webhook secret to verify
-        # the sender before processing any inbound message.
-        if sb is None or not getattr(sb, "webhook_secret", ""):
-            logger.error(
-                "SendBlue webhook rejected: webhook_secret not configured."
-            )
-            return Response("Webhook secret not configured", status_code=403)
-        header_secret = request.headers.get("x-sendblue-secret", "")
-        if not hmac.compare_digest(header_secret, sb.webhook_secret):
-            return Response("Invalid secret", status_code=403)
+        if sb is None:
+            logger.error("SendBlue webhook rejected: channel not configured.")
+            return Response("Channel not configured", status_code=403)
+
+        expected_secret = getattr(sb, "_webhook_secret", "")
+        if expected_secret:
+            header_secret = request.headers.get("x-sendblue-secret", "")
+            if not hmac.compare_digest(header_secret, expected_secret):
+                return Response("Invalid secret", status_code=403)
 
         # Ignore outbound status callbacks
         if payload.get("is_outbound", False):
@@ -407,7 +409,18 @@ def create_webhook_router(
 
             _sendblue_queues = {}
             _sendblue_queues["_lock"] = _th.Lock()
+            _sendblue_queues["_seen"] = []
             request.app.state._sendblue_queues = _sendblue_queues
+
+        message_handle = payload.get("message_handle") or payload.get("id") or ""
+        if message_handle:
+            with _sendblue_queues["_lock"]:
+                if message_handle in _sendblue_queues["_seen"]:
+                    logger.info("Ignoring duplicate SendBlue webhook: %s", message_handle)
+                    return Response("OK", status_code=200)
+                _sendblue_queues["_seen"].append(message_handle)
+                if len(_sendblue_queues["_seen"]) > 500:
+                    _sendblue_queues["_seen"].pop(0)
 
         def _handle_and_reply() -> None:
             import threading
@@ -418,42 +431,12 @@ def create_webhook_router(
             with lock:
                 q = _sendblue_queues.setdefault(from_number, {"pending": 0})
                 q["pending"] += 1
-                position = q["pending"]
-
-            # Immediate acknowledgment
-            if reply_channel:
-                if position > 1:
-                    reply_channel.send(
-                        from_number,
-                        f"Message received! Message {position} in"
-                        f" queue, will respond ASAP",
-                    )
-                else:
-                    reply_channel.send(
-                        from_number,
-                        "Message received! Working on it now...",
-                    )
-
-            # Periodic "still working" reminders every 60s
-            done_event = threading.Event()
-
-            def _send_reminders() -> None:
-                while not done_event.wait(60):
-                    if reply_channel:
-                        reply_channel.send(
-                            from_number,
-                            "Still working! Will reply ASAP",
-                        )
-
-            reminder = threading.Thread(target=_send_reminders, daemon=True)
-            reminder.start()
 
             try:
                 response = active_bridge.handle_incoming(
                     from_number, content, "sendblue"
                 )
             finally:
-                done_event.set()
                 with lock:
                     q["pending"] = max(0, q["pending"] - 1)
 

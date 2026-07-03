@@ -162,7 +162,7 @@ class AgentExecutor:
                         "type": "tool_call",
                         "input": {
                             "tool": event.data.get("tool"),
-                            "args": event.data.get("args"),
+                            "args": event.data.get("arguments") or event.data.get("args"),
                         },
                         "start_time": event.timestamp,
                     }
@@ -456,7 +456,7 @@ class AgentExecutor:
         import datetime
         import re
 
-        today = datetime.date.today().strftime("%A, %B %d, %Y")
+        current_time = datetime.datetime.now().strftime("%A, %B %d, %Y %H:%M")
         instruction = config.get("instruction", "")
         memory = (agent.get("summary_memory") or "").strip()
         last_run_at = agent.get("last_run_at")
@@ -475,13 +475,13 @@ class AgentExecutor:
 
         if instruction:
             input_text = (
-                f"Current date: {today}\n\nStanding instruction: {instruction}"
+                f"Current date/time: {current_time}\n\nStanding instruction: {instruction}"
             )
             if tick_note:
                 input_text += f"\n\n{tick_note}"
         else:
             base = tick_note or "Continue your assigned task."
-            input_text = f"Current date: {today}\n\n{base}"
+            input_text = f"Current date/time: {current_time}\n\n{base}"
         pending = self._manager.get_pending_messages(agent["id"])
         if pending:
             user_msgs = "\n".join(f"User: {m['content']}" for m in pending)

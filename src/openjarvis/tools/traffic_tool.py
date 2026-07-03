@@ -95,13 +95,13 @@ class TrafficTool(BaseTool):
             except Exception as e:
                 logger.error("Error looking up traffic with Google Maps: %s", e)
                 # Fallback to web search if API fails
-        
+
         # Fallback: Use WebSearchTool
         try:
             search_tool = WebSearchTool(max_results=3)
             query = f"current traffic conditions from {origin} to {destination}"
             search_result = search_tool.execute(query=query)
-            
+
             if search_result.success:
                 content = (
                     f"Traffic Report (via Web Search): {origin} to {destination}\n\n"

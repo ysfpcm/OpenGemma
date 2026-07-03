@@ -400,6 +400,28 @@ export async function fetchSpeechHealth(): Promise<SpeechHealth> {
 }
 
 // ---------------------------------------------------------------------------
+// System Metrics
+// ---------------------------------------------------------------------------
+
+export interface SystemMetrics {
+  ram_gb_total: number;
+  ram_gb_used: number;
+  cpu_percent: number;
+  api_routes_count: number;
+  latency_ms: number | null;
+}
+
+export async function fetchSystemMetrics(): Promise<SystemMetrics | null> {
+  try {
+    const res = await apiFetch(`/v1/system/metrics`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Agent Manager
 // ---------------------------------------------------------------------------
 
@@ -505,6 +527,20 @@ export async function createManagedAgent(body: {
   return res.json();
 }
 
+export async function generateAgentConfig(prompt: string): Promise<{
+  name: string;
+  instruction: string;
+  tools: string[];
+}> {
+  const res = await apiFetch(`/v1/managed-agents/generate-config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) throw new Error(`Failed: ${res.status}`);
+  return res.json();
+}
+
 export async function updateManagedAgent(
   agentId: string,
   body: Partial<{ name: string; agent_type: string; config: Record<string, unknown> }>,
@@ -562,8 +598,8 @@ export async function bindAgentChannel(
   channelType: string,
   config?: Record<string, unknown>,
 ): Promise<ChannelBinding> {
-  const res = await fetch(
-    `${getBase()}/v1/managed-agents/${agentId}/channels`,
+  const res = await apiFetch(
+    `/v1/managed-agents/${agentId}/channels`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -582,8 +618,8 @@ export async function unbindAgentChannel(
   agentId: string,
   bindingId: string,
 ): Promise<void> {
-  const res = await fetch(
-    `${getBase()}/v1/managed-agents/${agentId}/channels/${bindingId}`,
+  const res = await apiFetch(
+    `/v1/managed-agents/${agentId}/channels/${bindingId}`,
     { method: 'DELETE' },
   );
   if (!res.ok) throw new Error(`Failed: ${res.status}`);

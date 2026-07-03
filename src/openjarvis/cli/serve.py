@@ -456,7 +456,7 @@ def serve(
                                 if t.spec.name not in _existing:
                                     _channel_tools.append(t)
                                     _existing.add(t.spec.name)
-                                    
+
                         # Auto-discover connector live MCP tools
                         from openjarvis.core.registry import ConnectorRegistry
                         from openjarvis.mcp.server import ConnectorToolWrapper
@@ -684,27 +684,21 @@ def serve(
         "whatsapp_app_secret": _os.environ.get("WHATSAPP_APP_SECRET", ""),
     }
 
-    # Wrap existing channel in ChannelBridge orchestrator
-    if channel_bridge is not None:
-        try:
-            from openjarvis.server.channel_bridge import (
-                ChannelBridge,
-            )
-            from openjarvis.server.session_store import (
-                SessionStore,
-            )
+    # Always create a ChannelBridge so webhooks have a system reference
+    try:
+        from openjarvis.server.channel_bridge import ChannelBridge
+        from openjarvis.server.session_store import SessionStore
 
-            session_store = SessionStore()
-            channels = {channel_bridge.channel_id: channel_bridge}
-            channel_bridge = ChannelBridge(
-                channels=channels,
-                session_store=session_store,
-                bus=bus,
-                system=None,
-                agent_manager=agent_manager,
-            )
-        except Exception as exc:
-            logger.debug("ChannelBridge init skipped: %s", exc)
+        channels = {channel_bridge.channel_id: channel_bridge} if channel_bridge else {}
+        channel_bridge = ChannelBridge(
+            channels=channels,
+            session_store=SessionStore(),
+            bus=bus,
+            system=system,
+            agent_manager=agent_manager,
+        )
+    except Exception as exc:
+        logger.debug("ChannelBridge init skipped: %s", exc)
 
     app = create_app(
         engine,
