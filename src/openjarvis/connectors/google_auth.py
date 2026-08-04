@@ -70,6 +70,16 @@ def refresh_access_token(credentials_path: str) -> str:
         timeout=30.0,
     )
     if resp.status_code != 200:
+        try:
+            if resp.json().get("error") == "invalid_grant":
+                from openjarvis.connectors.oauth import delete_tokens
+                delete_tokens(credentials_path)
+                raise GoogleAuthError(
+                    "Google token has been revoked or expired. "
+                    "Credentials have been deleted. Please re-authenticate."
+                )
+        except Exception:
+            pass
         raise GoogleAuthError(
             f"Google token refresh failed ({resp.status_code}): {resp.text[:200]}"
         )

@@ -312,6 +312,11 @@ def refresh_google_token(path: str) -> Optional[str]:
     except httpx.HTTPError:
         return None
     if resp.status_code >= 400:
+        try:
+            if resp.json().get("error") == "invalid_grant":
+                delete_tokens(path)
+        except Exception:
+            pass
         return None
 
     body = resp.json()
