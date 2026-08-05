@@ -214,7 +214,15 @@ class OrchestratorAgent(ToolUsingAgent):
         self._emit_turn_start(input)
 
         # Build initial messages
-        messages = self._build_messages(input, context)
+        # The function-calling path must carry the managed agent's prompt as
+        # well.  Without this, channel-bound agents retained their tool list
+        # but silently lost instructions such as "use Gmail before refusing
+        # email access", causing the model to answer from general knowledge.
+        messages = self._build_messages(
+            input,
+            context,
+            system_prompt=self._system_prompt,
+        )
 
         # Get OpenAI-format tool definitions
         openai_tools = self._executor.get_openai_tools() if self._tools else []

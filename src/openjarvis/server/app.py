@@ -16,6 +16,7 @@ from openjarvis.server.comparison import comparison_router
 from openjarvis.server.connectors_router import create_connectors_router
 from openjarvis.server.dashboard import dashboard_router
 from openjarvis.server.digest_routes import create_digest_router
+from openjarvis.server.home_assistant_routes import router as home_assistant_router
 from openjarvis.server.research_router import router as research_router
 from openjarvis.server.routes import router
 from openjarvis.server.upload_router import router as upload_router
@@ -297,6 +298,7 @@ def create_app(
     app.include_router(research_router)
     app.include_router(analytics_router)
     app.include_router(system_metrics_router)
+    app.include_router(home_assistant_router)
     include_all_routes(app)
 
     # Restore SendBlue channel bindings from database on startup

@@ -68,6 +68,8 @@ EXPECTED_TOOLS = {
     "kg_add_relation",
     "kg_query",
     "kg_neighbors",
+    # home_assistant.py
+    "home_assistant_command",
 }
 
 

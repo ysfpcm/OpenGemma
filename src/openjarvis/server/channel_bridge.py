@@ -256,8 +256,51 @@ class ChannelBridge:
 
         query = content
 
-        # Try DeepResearchAgent first
-        if self._deep_research_agent is not None:
+        # A channel binding is a routing contract: messages received on that
+        # channel must use its managed agent, not the server-wide default.
+        # SendBlue is a single-line channel, so ``find_binding_for_channel``
+        # handles the common binding with no explicit ``config.channel``.
+        bound_agent = None
+        if self._agent_manager is not None:
+            try:
+                binding = self._agent_manager.find_binding_for_channel(
+                    channel_type, channel_type
+                )
+                if binding is not None:
+                    bound_agent = self._agent_manager.get_agent(
+                        binding["agent_id"]
+                    )
+            except Exception:
+                logger.exception("Unable to resolve channel binding for %s", channel_type)
+
+        if bound_agent is not None and self._system is not None:
+            try:
+                config = bound_agent.get("config", {})
+                tool_names = config.get("tools")
+                if isinstance(tool_names, str):
+                    tool_names = [
+                        name.strip() for name in tool_names.split(",") if name.strip()
+                    ]
+                result = self._system.ask(
+                    query,
+                    agent=bound_agent.get("agent_type") or None,
+                    tools=tool_names,
+                    system_prompt=config.get("system_prompt"),
+                    temperature=config.get("temperature"),
+                    max_tokens=config.get("max_tokens"),
+                    prior_messages=prior_msgs,
+                )
+                response_text = result.get("content", str(result))
+            except Exception:
+                logger.exception(
+                    "Bound agent %s failed while handling %s",
+                    bound_agent.get("id", "unknown"),
+                    channel_type,
+                )
+                response_text = "Sorry, I couldn't process that right now. Try again in a moment."
+
+        # Legacy fallback for channels with no managed-agent binding.
+        elif self._deep_research_agent is not None:
             try:
                 result = self._deep_research_agent.run(content)
                 response_text = result.content or "No results found."
