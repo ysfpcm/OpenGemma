@@ -152,10 +152,15 @@ async def _stream_openai(
     payload = {
         "model": model,
         "messages": _to_openai_msgs(messages),
-        "temperature": temperature,
-        "max_tokens": max_tokens,
         "stream": True,
     }
+    # GPT-5-family models use the Responses-era completion-token name and
+    # reject the legacy max_tokens parameter.
+    if model.startswith(("gpt-5", "o1-", "o3-", "o4-")):
+        payload["max_completion_tokens"] = max_tokens
+    else:
+        payload["temperature"] = temperature
+        payload["max_tokens"] = max_tokens
 
     async with httpx.AsyncClient(timeout=180) as client:
         async with client.stream(

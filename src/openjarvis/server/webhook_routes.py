@@ -379,7 +379,12 @@ def create_webhook_router(
 
         expected_secret = getattr(sb, "_webhook_secret", "")
         if expected_secret:
-            header_secret = request.headers.get("x-sendblue-secret", "")
+            # SendBlue's documented header is ``sb-signing-secret``.  Keep
+            # the old header as a compatibility fallback for older setups.
+            header_secret = request.headers.get(
+                "sb-signing-secret",
+                request.headers.get("x-sendblue-secret", ""),
+            )
             if not hmac.compare_digest(header_secret, expected_secret):
                 return Response("Invalid secret", status_code=403)
 

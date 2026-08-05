@@ -292,14 +292,56 @@ class QueryOrchestrator:
         }
 
     def _build_tools(self, tool_names: List[str]) -> List[BaseTool]:
-        """Build tool instances from tool names."""
+        """Resolve tool names from the live system and static registry.
+
+        Connector tools (Gmail, Drive, Calendar, etc.) are discovered at
+        server startup and already exist on ``JarvisSystem.tools``.  They are
+        not registered in the static ``ToolRegistry``.  Resolving only through
+        that registry silently discarded every connector tool whenever a
+        managed channel agent supplied an explicit tools list.
+        """
         from openjarvis.core.registry import ToolRegistry
 
         s = self._system
         tools: List[BaseTool] = []
+        live_tools = {
+            tool.spec.name: tool
+            for tool in getattr(s, "tools", [])
+            if getattr(getattr(tool, "spec", None), "name", None)
+        }
+        executor = getattr(s, "tool_executor", None)
+        if executor is not None:
+            for name, tool in (getattr(executor, "_tools", {}) or {}).items():
+                live_tools.setdefault(name, tool)
+
+        # A server launched with ``Agent: none`` can legitimately have no
+        # prebuilt tools even though connected OAuth connectors are available.
+        # Resolve only the requested connector tools here so channel-bound
+        # managed agents work independently of the server-wide agent setting.
+        unresolved = set(tool_names) - set(live_tools)
+        if unresolved:
+            try:
+                import openjarvis.connectors  # noqa: F401
+                from openjarvis.core.registry import ConnectorRegistry
+                from openjarvis.mcp.server import ConnectorToolWrapper
+
+                for _connector_id, connector_cls in ConnectorRegistry.items():
+                    connector = connector_cls()
+                    if not connector.is_connected():
+                        continue
+                    for spec in connector.mcp_tools():
+                        if spec.name in unresolved:
+                            live_tools[spec.name] = ConnectorToolWrapper(connector, spec)
+                            unresolved.remove(spec.name)
+                    if not unresolved:
+                        break
+            except Exception as exc:
+                logger.warning("Failed to resolve live connector tools: %s", exc)
         for name in tool_names:
             try:
-                if name == "retrieval" and s.memory_backend:
+                if name in live_tools:
+                    tools.append(live_tools[name])
+                elif name == "retrieval" and s.memory_backend:
                     from openjarvis.tools.retrieval import RetrievalTool
 
                     tools.append(RetrievalTool(s.memory_backend))
