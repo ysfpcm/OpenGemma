@@ -4,7 +4,7 @@ Phase 1 is **verifying**. The implementation and exit-gate evidence are complete
 
 ## Reproducible source and environment
 
-- Source snapshot: `76dd8c6682649e65ac7590ea06d9f687dc47d6cd`
+- Source snapshot: `ea629ab625ea1d7cac0b1d2d96f23d921da271dc`
 - Date: 2026-08-15, America/New_York
 - Codex: `codex-cli 0.147.0`
 - Protocol: App Server v2 over local stdio

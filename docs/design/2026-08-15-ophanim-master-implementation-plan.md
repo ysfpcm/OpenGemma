@@ -236,7 +236,7 @@ Marc should see:
 Phase: 1
 Status: verifying
 Acceptance scenario version: 1
-Source snapshot: 76dd8c6682649e65ac7590ea06d9f687dc47d6cd
+Source snapshot: ea629ab625ea1d7cac0b1d2d96f23d921da271dc
 Migrations: Codex observer schema v1; scoped rollback verified
 Tests: 117 backend passed; 6 frontend passed; production build passed; live App Server scenario passed
 Metrics: 0 duplicate replay updates; 0 unauthorized operations; 100% milestone traceability; workspace unchanged
