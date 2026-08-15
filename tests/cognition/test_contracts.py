@@ -110,7 +110,7 @@ def test_backup_and_rollback_restore_pre_migration_fixture(tmp_path):
         )
         assert (
             restored.execute(
-                "SELECT name FROM sqlite_master WHERE name='cognition_contracts'"
+                "SELECT name FROM sqlite_master WHERE name='cognition_records'"
             ).fetchone()
             is None
         )

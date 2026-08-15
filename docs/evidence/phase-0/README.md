@@ -20,8 +20,8 @@ Phase 0 is implemented and technically verified. Its program status remains
 - `CognitionStore` applies numbered migration `0001_phase0.sql` and records it
   in `schema_migrations`.
 - `0001_phase0.down.sql` removes only Phase 0 tables and triggers.
-- `ContractStore` adds its versioned contract tables without touching legacy
-  tables.
+- `CognitionStore` adds its versioned contract/action tables without touching
+  legacy tables.
 - The rollback test restores a pre-migration SQLite fixture byte-for-byte and
   proves its legacy marker remains while the Phase 0 table is absent.
 - Operational rollback: stop Ophanim, retain the current database, apply the
