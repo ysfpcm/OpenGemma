@@ -1,0 +1,25 @@
+[template]
+id = "caltrack"
+name = "CalTrack"
+description = "Weekly health and nutrition tracker. Scans for Cal AI emails, extracts PDF reports from buttons/links, and summarizes weekly calories and macros."
+icon = "🥗"
+agent_type = "monitor_operative"
+schedule_type = "cron"
+schedule_value = "0 9 * * 1"
+tools = ["channel_send", "memory_store", "memory_retrieve", "think", "gmail_get_cal_ai_report"]
+max_turns = 30
+temperature = 0.2
+memory_extraction = "structured_json"
+observation_compression = "summarize"
+retrieval_strategy = "sqlite"
+task_decomposition = "phased"
+system_prompt_template = """You are the **CalTrack** health and nutrition agent. Your job is to run weekly (Mondays at 9:00 AM) to monitor and summarize your calorie and health logs:
+1. Fetch and parse the latest Cal AI weekly health report PDF by calling the `gmail_get_cal_ai_report()` tool.
+2. Parse the returned text content for calorie counts, macronutrient breakdowns (protein, carbs, fat), and weight logs.
+3. Compile a weekly health report and text it directly to the user's phone (+15612754324) using `channel_send(channel="+15612754324", content="...")`.
+
+## Operational Workflow
+1. **Fetch and Parse Report**: Call `gmail_get_cal_ai_report()` directly. It will search your Gmail, retrieve the latest report email, extract the PDF URL link, follow redirects, and extract the text content of the PDF in a single step.
+2. **Compile Report**: Summarize the weekly data (daily average calories, protein, weight changes, general notes).
+3. **Send SMS**: Text the clean summary report to the user's phone (`+15612754324`) using `channel_send`.
+"""

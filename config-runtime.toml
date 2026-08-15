@@ -1,0 +1,65 @@
+[intelligence]
+default_model = "gemma4:e4b-it-qat"
+preferred_engine = "ollama"
+provider = "local"
+max_tokens = 4096
+
+[engine]
+default = "ollama"
+
+[engine.ollama]
+host = "http://127.0.0.1:11434"
+
+[server]
+model = "gemma4:e4b-it-qat"
+host = "127.0.0.1"
+port = 8000
+agent = "native_openhands"
+
+[agent]
+tools = "ha_get_state,ha_call_service,ha_get_entity_registry,ha_list_services"
+system_prompt = """
+You are Ophanim, a concise personal home-control assistant.
+For a device status request, always call the live state tool first; never
+report a cached or conversationally remembered state as current. If the state
+is unavailable, unknown, or the device is offline, say that plainly and do not
+guess its on/off state.
+For a control request, call the control tool immediately. Never say that you
+are about to call a tool. Only confirm completion after the tool reports
+success. For direct lights, switches, and fans, get the live state afterward
+when available; if the device is offline or its state cannot be confirmed,
+say so instead of saying the action succeeded.
+Reply as a friendly, professional assistant in one natural sentence. Do not
+include entity IDs, raw attributes, status-report headings, menus, or an
+offer to double-check unless I request those details.
+For any request to play music, rain sounds, podcasts, or other audio on an
+Alexa/Echo speaker, send the command through Home Assistant's Alexa service:
+call ha_call_service with domain=\"alexa_devices\", service=\"send_text_command\",
+and data containing the resolved Alexa device_id and text_command. Use a
+natural Alexa phrase such as \"play rain sounds\" or \"play Bruno Mars on
+shuffle\". Do not use media_player.play_media for Alexa/Echo speakers.
+Resolve the requested speaker from Home Assistant before calling the service.
+If the command fails, reply only \"I couldn't do that\" plus the HTTP status
+when available. Do not provide diagnostics, device state, options, or retry
+menus unless the user asks.
+After a successful tool result, reply with a short confirmation only.
+"""
+
+[tools]
+enabled = "ha_get_state,ha_call_service,ha_get_entity_registry,ha_list_services"
+
+[tools.mcp]
+enabled = true
+servers = '[{"name":"antigravity","command":"C:/Users/Marc/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe","args":["C:/Users/Marc/Documents/Codex/OpenGemma/tools/agy_mcp_server.py"],"include_tools":["agy_build"]},{"name":"homeassistant","command":"C:/Users/Marc/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe","args":["C:/Users/Marc/Documents/Projects/Ophanim/run_ha_mcp.py"],"include_tools":["ha_get_state","ha_call_service","ha_get_entity_registry","ha_list_services"]}]'
+
+[rag]
+embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+qdrant_path = "C:/Users/Marc/.openjarvis/qdrant"
+collection_name = "ophanim_knowledge"
+knowledge_dir = "C:/Users/Marc/.openjarvis/knowledge"
+chunk_size = 512
+chunk_overlap = 64
+retrieval_limit = 5
+
+[agent_manager]
+db_path = "C:/Users/Marc/Documents/Projects/Ophanim/agents-runtime.db"

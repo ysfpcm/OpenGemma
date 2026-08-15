@@ -1,0 +1,16 @@
+[
+  {"entity_id":"light.livingroomlamp","name":"Living Room Lamp","domain":"light","area":"Living Room","aliases":["reading light","corner lamp"]},
+  {"entity_id":"switch.coffee_maker","name":"Coffee Maker","domain":"switch","area":"Kitchen","aliases":["coffee machine"]},
+  {"entity_id":"fan.bedroom","name":"Bedroom Fan","domain":"fan","area":"Bedroom","aliases":["sleep fan"]},
+  {"entity_id":"climate.hallway","name":"Hallway Thermostat","domain":"climate","area":"Hallway","aliases":["thermostat","hall thermostat"]},
+  {"entity_id":"media_player.living_room_tv","name":"Living Room TV","domain":"media_player","area":"Living Room","aliases":["television","tv"]},
+  {"entity_id":"cover.living_room_blinds","name":"Living Room Blinds","domain":"cover","area":"Living Room","aliases":["shades","window blinds"]},
+  {"entity_id":"lock.front_door","name":"Front Door Lock","domain":"lock","area":"Entryway","aliases":["front door"]},
+  {"entity_id":"scene.movie_mode","name":"Movie Mode","domain":"scene","area":"Living Room","aliases":["movie scene"]},
+  {"entity_id":"script.goodnight","name":"Goodnight Routine","domain":"script","area":"House","aliases":["bedtime routine"]},
+  {"entity_id":"automation.porch_lights","name":"Porch Lights Automation","domain":"automation","area":"Porch","aliases":["porch automation"]},
+  {"entity_id":"sensor.hallway_temperature","name":"Hallway Temperature","domain":"sensor","area":"Hallway","aliases":["hall temperature"]},
+  {"entity_id":"sensor.bathroom_humidity","name":"Bathroom Humidity","domain":"sensor","area":"Bathroom","aliases":["bath humidity"]},
+  {"entity_id":"sensor.phone_battery","name":"Phone Battery","domain":"sensor","area":"Office","aliases":["phone charge"]},
+  {"entity_id":"binary_sensor.hall_motion","name":"Hall Motion","domain":"binary_sensor","area":"Hallway","aliases":["motion sensor"]}
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "entity_id": "light.livingroomlamp",
+    "name": "Living Room Lamp",
+    "domain": "light",
+    "area": "Living Room",
+    "aliases": ["reading light", "corner lamp"]
+  },
+  {
+    "entity_id": "light.bedroomlamp",
+    "name": "Bedroom Lamp",
+    "domain": "light",
+    "area": "Bedroom",
+    "aliases": ["nightstand light", "bedside light"]
+  },
+  {
+    "entity_id": "light.kitchenlight",
+    "name": "Kitchen Light",
+    "domain": "light",
+    "area": "Kitchen",
+    "aliases": ["counter light", "kitchen lights"]
+  }
+]

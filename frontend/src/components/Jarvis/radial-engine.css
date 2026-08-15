@@ -1,0 +1,40 @@
+@keyframes radial-flow {
+  to { stroke-dashoffset: -40; }
+}
+
+@keyframes radial-node-pulse {
+  0%, 100% { opacity: 0.2; transform: scale(0.88); }
+  50% { opacity: 0.65; transform: scale(1.08); }
+}
+
+.radial-link-active {
+  stroke-dasharray: 8 12;
+  animation: radial-flow 1.2s linear infinite;
+}
+
+.radial-node-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: radial-node-pulse 1.8s ease-in-out infinite;
+}
+
+.radial-node:focus-visible {
+  outline: none;
+}
+
+.radial-node:focus-visible circle:first-child {
+  stroke: #f8fafc;
+  stroke-width: 3;
+}
+
+.radial-inspector pre {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(34, 211, 238, 0.35) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radial-link-active,
+  .radial-node-pulse {
+    animation: none;
+  }
+}
