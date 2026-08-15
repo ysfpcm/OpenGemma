@@ -9,11 +9,11 @@ Phase 0 is implemented and technically verified. Its program status remains
 
 - Date: 2026-08-15
 - Python: 3.12.13
-- Package schema: cognition contract schema `1`
+- Package schema: cognition contract schema `1.0`
 - SQLite migration: action/cognition schema `1`
 - Phase flags: Phase 0 on; Phases 1-12 off unless explicitly enabled by an
   `OPHANIM_PHASE_<n>_ENABLED=1` environment variable.
-- Source snapshot: `a32c6fb6812694888369ade895fe889e8ce457e4`.
+- Source snapshot: `7d91abbe7d83ea12ad013cf05a7d38a75124c505`.
 
 ## Migrations and rollback
 
