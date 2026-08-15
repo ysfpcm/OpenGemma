@@ -13,7 +13,7 @@ Phase 0 is implemented and technically verified. Its program status remains
 - SQLite migration: action/cognition schema `1`
 - Phase flags: Phase 0 on; Phases 1-12 off unless explicitly enabled by an
   `OPHANIM_PHASE_<n>_ENABLED=1` environment variable.
-- Source snapshot: pending initial Git commit; updated after snapshot creation.
+- Source snapshot: `a32c6fb6812694888369ade895fe889e8ce457e4`.
 
 ## Migrations and rollback
 
@@ -34,7 +34,7 @@ Commands are run from the repository root with workspace-local temporary paths.
 
 | Lane | Result |
 |---|---|
-| Phase 0 contracts, lifecycle, acceptance, and approval routes | 114 passed |
+| Phase 0 contracts, lifecycle, acceptance, and approval routes | 115 passed |
 | Phase 0 lint | passed |
 | Frontend tests | 6 passed |
 | Initial full Python baseline | collection blocked by absent optional `polars` dependency |
@@ -93,4 +93,3 @@ The executable scenario is
   deferred to Phase 3.
 - Marc acceptance is intentionally not self-granted by the implementation.
 - The unrelated repository baseline debt listed above remains open.
-

@@ -131,9 +131,9 @@ If the result cannot be reproduced from that evidence, the phase is not complete
 Phase: 0
 Status: verifying
 Acceptance scenario version: 1
-Source snapshot: pending initial Git snapshot
+Source snapshot: a32c6fb6812694888369ade895fe889e8ce457e4
 Migrations: cognition/action schema v1; downgrade and fixture restore verified
-Tests: Phase 0 114 passed; frontend 6 passed; broader baseline has documented unrelated failures
+Tests: Phase 0 115 passed; frontend 6 passed; broader baseline has documented unrelated failures
 Metrics: 0 duplicate effects; 0 false verified/executed states in acceptance replay
 Security review: append-only evidence and fail-closed transitions verified; no new external data flow
 Known limitations: repository-wide baseline contains pre-existing failures listed in the evidence pack
