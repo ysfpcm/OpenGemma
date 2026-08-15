@@ -152,6 +152,17 @@ def test_observer_forces_read_only_and_tracks_deduplicated_state(
     client.emit("turn/plan/updated", plan)
     client.emit("turn/plan/updated", plan)
     client.emit("item/completed", command)
+    client.emit(
+        "item/completed",
+        {
+            "threadId": "thread-1",
+            "item": {
+                "type": "mcpToolCall",
+                "name": "read_context",
+                "status": "completed",
+            },
+        },
+    )
     client.emit("turn/diff/updated", {"threadId": "thread-1", "diff": "read-only"})
     client.emit(
         "thread/tokenUsage/updated",
@@ -167,6 +178,7 @@ def test_observer_forces_read_only_and_tracks_deduplicated_state(
     assert observed["plan"] == plan["plan"]
     assert observed["commands"][0]["authorization"] == REDACTED
     assert observed["usage"] == {"total": 42}
+    assert observed["tools"][0]["name"] == "read_context"
     assert observed["files"] == [{"type": "aggregatedDiff", "diff": "read-only"}]
     assert (
         len(
@@ -208,6 +220,27 @@ def test_restart_preserves_ledger_and_resumes_same_thread(
     assert replacement.requests[-1][0] == "thread/resume"
     assert replacement.requests[-1][1]["sandbox"] == "read-only"
     assert store.get(mission["id"])["phase"] == "recovered"
+
+
+def test_observed_error_is_blocked_and_published_as_error(
+    store: CodexMissionStore, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = FakeClient()
+    bus = EventBus(record_history=True)
+    observer = CodexObserverSupervisor(
+        store, roots=[str(workspace)], bus=bus, client=client
+    )
+    mission = observer.start_mission("Inspect", str(workspace))
+    client.emit(
+        "turn/error",
+        {"threadId": "thread-1", "message": "token=abcdefghijklmno"},
+    )
+    observed = store.get(mission["id"])
+    assert observed["status"] == "blocked"
+    assert "abcdefghijklmno" not in json.dumps(observed["errors"])
+    assert bus.history[-1].event_type == EventType.CODEX_MISSION_ERROR
 
 
 def test_workspace_scope_cannot_be_widened(

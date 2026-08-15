@@ -234,15 +234,15 @@ Marc should see:
 
 ```text
 Phase: 1
-Status: building
+Status: verifying
 Acceptance scenario version: 1
-Source snapshot: pending verification
-Migrations: pending
-Tests: baseline in evidence pack
-Metrics: pending
-Security review: read-only boundary under test
-Known limitations: pending
-Rollback verified: pending
+Source snapshot: 76dd8c6682649e65ac7590ea06d9f687dc47d6cd
+Migrations: Codex observer schema v1; scoped rollback verified
+Tests: 117 backend passed; 6 frontend passed; production build passed; live App Server scenario passed
+Metrics: 0 duplicate replay updates; 0 unauthorized operations; 100% milestone traceability; workspace unchanged
+Security review: read-only/no-network/no-approval boundary, root scope, redaction, and reasoning suppression verified
+Known limitations: active-writer recovery is observed/classified, never seized; optional Rust baseline failures remain
+Rollback verified: yes
 Marc acceptance: pending
 ```
 
@@ -303,13 +303,13 @@ While Codex works, Marc should see Ophanim produce deduplicated milestone update
 
 ## Exit gate
 
-- [ ] Ophanim shows correct thread, turn, command, tool, plan, and completion state.
-- [ ] Progress summaries do not claim hidden chain-of-thought.
-- [ ] No duplicate updates are emitted for unchanged state.
-- [ ] Secrets and unsafe payload fields are redacted.
-- [ ] App Server restart does not corrupt the mission ledger.
-- [ ] Observer mode cannot steer, approve, write, or widen workspace scope.
-- [ ] The final summary is traceable to underlying events.
+- [x] Ophanim shows correct thread, turn, command, tool, plan, and completion state.
+- [x] Progress summaries do not claim hidden chain-of-thought.
+- [x] No duplicate updates are emitted for unchanged state.
+- [x] Secrets and unsafe payload fields are redacted.
+- [x] App Server restart does not corrupt the mission ledger.
+- [x] Observer mode cannot steer, approve, write, or widen workspace scope.
+- [x] The final summary is traceable to underlying events.
 
 ## Do not include yet
 
