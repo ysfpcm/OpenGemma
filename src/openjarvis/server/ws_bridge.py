@@ -85,6 +85,8 @@ _CONSOLE_EVENTS = {
     EventType.CAMERA_STATUS,
     EventType.SNAPSHOT_RECEIVED,
     EventType.SNAPSHOT_FAILED,
+    EventType.CODEX_MISSION_UPDATE,
+    EventType.CODEX_MISSION_ERROR,
 }
 
 _CONSOLE_CATEGORIES = {
@@ -109,6 +111,7 @@ _CONSOLE_CATEGORIES = {
     "motion": "context",
     "camera": "cameras",
     "snapshot": "cameras",
+    "codex": "agents",
 }
 
 _SAFE_CONSOLE_KEYS = {
@@ -164,6 +167,8 @@ _SAFE_CONSOLE_KEYS = {
     "context_event_id",
     "changed_state_count",
     "updated_state_count",
+    "mission_id",
+    "summary",
 }
 
 

@@ -111,6 +111,7 @@ class Observation(CognitionContract):
     contract_type: ClassVar[str] = "observation"
     subject: str = ""
     value: Any = None
+    source_kind: str = "observed"
 
 
 @dataclass

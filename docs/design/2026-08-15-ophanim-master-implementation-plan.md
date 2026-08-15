@@ -129,7 +129,7 @@ If the result cannot be reproduced from that evidence, the phase is not complete
 
 ```text
 Phase: 0
-Status: verifying
+Status: accepted
 Acceptance scenario version: 1
 Source snapshot: 7d91abbe7d83ea12ad013cf05a7d38a75124c505
 Migrations: cognition/action schema v1; downgrade and fixture restore verified
@@ -138,7 +138,7 @@ Metrics: 0 duplicate effects; 0 false verified/executed states in acceptance rep
 Security review: append-only evidence and fail-closed transitions verified; no new external data flow
 Known limitations: repository-wide baseline contains pre-existing failures listed in the evidence pack
 Rollback verified: yes
-Marc acceptance: pending
+Marc acceptance: accepted 2026-08-15 in Codex task
 ```
 
 ## Build
@@ -231,6 +231,20 @@ Marc should see:
 # Phase 1 — Codex read-only observer
 
 **Goal:** Make serious Codex work visible inside Ophanim before giving Ophanim any control over it.
+
+```text
+Phase: 1
+Status: building
+Acceptance scenario version: 1
+Source snapshot: pending verification
+Migrations: pending
+Tests: baseline in evidence pack
+Metrics: pending
+Security review: read-only boundary under test
+Known limitations: pending
+Rollback verified: pending
+Marc acceptance: pending
+```
 
 ## Build
 

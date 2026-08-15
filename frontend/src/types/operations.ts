@@ -93,3 +93,27 @@ export interface ContextInspect {
   }>;
   warnings: string[];
 }
+
+export interface CodexMission {
+  id: string;
+  objective: string;
+  workspace: string;
+  thread_id: string | null;
+  active_turn_id: string | null;
+  status: string;
+  phase: string;
+  progress: string;
+  plan: unknown[];
+  commands: Array<Record<string, unknown>>;
+  tools: Array<Record<string, unknown>>;
+  files: Array<Record<string, unknown>>;
+  verification_state: string;
+  errors: Array<Record<string, unknown>>;
+  usage: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  last_meaningful_at: string;
+  interrupted_reason: string | null;
+  milestones?: Array<{ summary: string; event_fingerprint: string; recorded_at: string }>;
+  events?: Array<{ id: number; fingerprint: string; method: string; display: Record<string, unknown>; recorded_at: string }>;
+}

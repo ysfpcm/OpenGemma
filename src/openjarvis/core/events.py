@@ -91,6 +91,9 @@ class EventType(str, Enum):
     CAMERA_STATUS = "camera_status"
     SNAPSHOT_RECEIVED = "snapshot_received"
     SNAPSHOT_FAILED = "snapshot_failed"
+    # Phase 1 — read-only Codex observer
+    CODEX_MISSION_UPDATE = "codex_mission_update"
+    CODEX_MISSION_ERROR = "codex_mission_error"
 
 
 @dataclass(slots=True)

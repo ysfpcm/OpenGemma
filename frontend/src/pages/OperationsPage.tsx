@@ -1,6 +1,7 @@
 import { Activity, Cpu, ShieldCheck, Terminal } from 'lucide-react';
 import { AgentRunStatus } from '../components/Operations/AgentRunStatus';
 import { ContextAtlas } from '../components/Operations/ContextAtlas';
+import { CodexMissions } from '../components/Operations/CodexMissions';
 import { LiveTerminal } from '../components/Operations/LiveTerminal';
 import { useSystemEvents } from '../lib/useSystemEvents';
 import { useAppStore } from '../lib/store';
@@ -19,6 +20,7 @@ export function OperationsPage() {
     </header>
     <main className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col gap-3 overflow-y-auto p-3 sm:p-4 lg:grid lg:grid-cols-2">
       <AgentRunStatus />
+      <CodexMissions />
       <LiveTerminal events={events} connection={connection} onClear={clearEvents} />
       <ContextAtlas events={events} />
     </main>

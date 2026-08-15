@@ -1,5 +1,5 @@
 import type { ContextSnapshot, ModelInfo, SavingsData, ServerInfo } from '../types';
-import type { ContextInspect } from '../types/operations';
+import type { CodexMission, ContextInspect } from '../types/operations';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './supabase';
 
 // ---------------------------------------------------------------------------
@@ -141,6 +141,18 @@ export const apiFetch = (
   );
   return fetch(`${getBase()}${path}`, { ...init, headers });
 };
+
+export async function fetchCodexMissions(): Promise<CodexMission[]> {
+  const response = await apiFetch('/v1/codex/missions');
+  if (!response.ok) throw new Error(`Unable to load Codex missions (${response.status})`);
+  return (await response.json()).missions as CodexMission[];
+}
+
+export async function fetchCodexMission(id: string): Promise<CodexMission> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}`);
+  if (!response.ok) throw new Error(`Unable to load Codex mission (${response.status})`);
+  return await response.json() as CodexMission;
+}
 
 async function tauriInvoke<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core');
