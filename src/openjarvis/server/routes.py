@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
+import time
 import uuid
+from difflib import SequenceMatcher
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from openjarvis.core.paths import get_config_dir
 from openjarvis.core.events import EventType
+from openjarvis.core.paths import get_config_dir
 from openjarvis.core.types import Message, Role
+from openjarvis.server.departure_watcher_chat import (
+    arm_departure_watcher_from_chat,
+    format_departure_watcher_chat_result,
+    parse_departure_watcher_request,
+)
 from openjarvis.server.models import (
     ChatCompletionChunk,
     ChatCompletionRequest,
@@ -80,6 +89,110 @@ _MANAGED_API_KEYS = (
 )
 _MANAGED_API_KEY_SET = frozenset(_MANAGED_API_KEYS)
 _MAX_API_KEY_LENGTH = 4096
+_ALEXA_AUDIO_PATTERN = re.compile(
+    r"^(?:please\s+)?(?P<command>play|put on|start|stop|pause|resume)\b(?P<detail>.*)$",
+    re.IGNORECASE,
+)
+_ALEXA_DEVICE_ENVIRONMENTS = (
+    ("Kitchen Echo Dot", "OPHANIM_ALEXA_KITCHEN_DEVICE_ID"),
+    ("Main Bedroom Speaker", "OPHANIM_ALEXA_MAIN_BEDROOM_DEVICE_ID"),
+    ("Bedroom Speaker", "OPHANIM_ALEXA_BEDROOM_DEVICE_ID"),
+)
+_PENDING_AUDIO_COMMANDS: dict[str, tuple[str, float]] = {}
+_PENDING_AUDIO_TTL_SECONDS = 120.0
+
+
+def _match_alexa_device(query: str) -> tuple[str, str] | None:
+    """Find one speaker, accepting only high-confidence name typos."""
+    normalized_query = " ".join(query.casefold().split())
+    candidates: list[tuple[float, str, str]] = []
+    for name, env_name in _ALEXA_DEVICE_ENVIRONMENTS:
+        device_id = os.environ.get(env_name, "").strip()
+        normalized_name = " ".join(name.casefold().split())
+        if not device_id:
+            continue
+        if normalized_name in normalized_query:
+            candidates.append((1.0, name, device_id))
+            continue
+        words = normalized_query.split()
+        name_words = len(normalized_name.split())
+        score = max(
+            (
+                SequenceMatcher(None, " ".join(words[index : index + width]), normalized_name).ratio()
+                for width in range(max(1, name_words - 1), name_words + 2)
+                for index in range(max(0, len(words) - width + 1))
+            ),
+            default=0.0,
+        )
+        if score >= 0.86:
+            candidates.append((score, name, device_id))
+    if len(candidates) != 1:
+        return None
+    _, name, device_id = candidates[0]
+    return name, device_id
+
+
+def _try_handle_alexa_audio_command(
+    query: str, request: Request, session_id: str
+) -> str | None:
+    """Dispatch a clear audio request after its speaker is explicitly chosen."""
+    now = time.monotonic()
+    pending = _PENDING_AUDIO_COMMANDS.get(session_id)
+    if pending and now - pending[1] > _PENDING_AUDIO_TTL_SECONDS:
+        _PENDING_AUDIO_COMMANDS.pop(session_id, None)
+        pending = None
+
+    match = _ALEXA_AUDIO_PATTERN.match(query.strip())
+    if match is None and pending is not None:
+        query = f"{pending[0]} on {query}".strip()
+        match = _ALEXA_AUDIO_PATTERN.match(query)
+    if not match:
+        return None
+    matched_device = _match_alexa_device(query)
+    if matched_device is None:
+        _PENDING_AUDIO_COMMANDS[session_id] = (query, now)
+        names = ", ".join(name for name, _ in _ALEXA_DEVICE_ENVIRONMENTS)
+        return f"Which speaker should I use: {names}?"
+    _PENDING_AUDIO_COMMANDS.pop(session_id, None)
+    device_name, device_id = matched_device
+    command = match.group("command").casefold()
+    detail = match.group("detail").strip()
+    for known_name, _ in _ALEXA_DEVICE_ENVIRONMENTS:
+        detail = re.sub(re.escape(known_name), "", detail, flags=re.IGNORECASE)
+    detail = re.sub(r"\b(?:on|in|through)\b\s*$", "", detail, flags=re.IGNORECASE)
+    text_command = f"{command} {detail}".strip()
+
+    from openjarvis.cognition import ActionProposal
+
+    guardian = getattr(request.app.state, "guardian", None)
+    if guardian is None:
+        return "Home control is unavailable because the Guardian is not configured."
+    action_id = uuid.uuid4().hex
+    action_type = "home_assistant.alexa_text_command"
+    try:
+        guardian.grant(
+            grant_id=f"chat-alexa-{action_id}",
+            session_id=session_id,
+            capability="home.assistant.write",
+            scope={"action_type": action_type, "target": device_id},
+            expires_in_seconds=60,
+        )
+        proposal = ActionProposal(
+            id=action_id,
+            action_type=action_type,
+            description=query,
+            parameters={"target": device_id, "text_command": text_command},
+            idempotency_key=f"chat-alexa:{action_id}",
+            provenance={"component": "server.chat", "authority": "typed-command"},
+        )
+        decision = guardian.authorize(proposal, session_id=session_id, authority="Marc")
+        if not decision.allowed:
+            return "I couldn't do that."
+        result = guardian.execute(action_id, decision.authorization, verify=False)
+    except Exception:
+        logging.getLogger("openjarvis.server").exception("Alexa command failed")
+        return "I couldn't do that."
+    return f"{device_name}: command sent." if result.outcome.success else "I couldn't do that."
 
 
 def _read_saved_api_keys(keys_path) -> dict[str, str]:
@@ -129,6 +242,199 @@ def _last_user_query(request_body: ChatCompletionRequest) -> str:
         if message.role == "user" and message.content:
             return message.content
     return ""
+
+
+def _chat_conversation_id(request_body: ChatCompletionRequest, request: Request) -> str:
+    """Resolve the durable conversation link for a chat-created watcher."""
+
+    return (
+        str(request_body.conversation_id or "").strip()
+        or request.headers.get("X-Conversation-ID", "").strip()
+        or request.headers.get("X-Thread-ID", "").strip()
+        or "chat:anonymous"
+    )
+
+
+def _home_intent_query(request_body: ChatCompletionRequest) -> str:
+    """Restore the action when a user answers a device clarification.
+
+    Chat transports send the complete local conversation on each turn.  A
+    reply such as ``living room lamp`` is not an action on its own, so append
+    it to the immediately preceding user command only when the assistant's
+    prior turn was an explicit device clarification.  This keeps an unrelated
+    bare device mention from becoming an unintended command.
+    """
+    query = _last_user_query(request_body)
+    messages = request_body.messages
+    if len(messages) < 3:
+        return query
+
+    prior_assistant = messages[-2]
+    prior_user = messages[-3]
+    clarification = (prior_assistant.content or "").lower()
+    if (
+        prior_assistant.role == "assistant"
+        and prior_user.role == "user"
+        and any(
+            phrase in clarification
+            for phrase in (
+                "which device do you mean",
+                "which device should i use",
+                "which device",
+                "which speaker should i use",
+                "which speaker",
+            )
+        )
+    ):
+        return f"{prior_user.content or ''} {query}".strip()
+    return query
+
+
+def _try_handle_home_assistant_chat_intent(
+    request_body: ChatCompletionRequest,
+    request: Request,
+) -> str | None:
+    """Execute a clear, reversible home command without relying on model choice.
+
+    The chat client intentionally does not ship a raw tool schema on every
+    request.  That is correct for ordinary conversation, but it meant an
+    explicit request such as ``turn on the living room lamp`` could be answered
+    from the read-only live-context prompt instead of being dispatched.  Resolve
+    only an unambiguous Home Assistant intent here.  Writes remain bounded to
+    the Guardian's registered reversible actions, with a one-time, narrowly
+    scoped grant representing the user's typed command and an independent
+    read-back verification.
+    """
+    query = _home_intent_query(request_body)
+    if not query:
+        return None
+
+    audio_result = _try_handle_alexa_audio_command(
+        query, request, _chat_conversation_id(request_body, request)
+    )
+    if audio_result is not None:
+        return audio_result
+
+    try:
+        from openjarvis.behavior import BehaviorEntity, BehaviorResolver
+        from openjarvis.cognition import ActionProposal
+        from openjarvis.tools.home_assistant import HomeAssistantTool
+
+        tool = HomeAssistantTool()
+        states = tool._get_states()
+        entities = tuple(
+            BehaviorEntity(
+                entity_id=str(state["entity_id"]),
+                name=str(
+                    state.get("attributes", {}).get("friendly_name")
+                    or state["entity_id"]
+                ),
+                domain=str(state["entity_id"]).split(".", 1)[0],
+                area=str(
+                    state.get("attributes", {}).get("area_name")
+                    or state.get("attributes", {}).get("area_id")
+                    or ""
+                ),
+                aliases=tuple(
+                    alias
+                    for alias in state.get("attributes", {}).get("aliases", ())
+                    if isinstance(alias, str)
+                ),
+            )
+            for state in states
+            if isinstance(state, dict) and "." in str(state.get("entity_id") or "")
+        )
+        resolution = BehaviorResolver().resolve(query, entities=entities)
+    except Exception:
+        # Home Assistant is optional.  A connector outage must not turn every
+        # normal chat request into a home-control error.
+        logging.getLogger("openjarvis.server").debug(
+            "Deterministic Home Assistant routing unavailable", exc_info=True
+        )
+        return None
+
+    if resolution.status == "clarify":
+        return resolution.clarification or "Which device do you mean?"
+    if resolution.status != "execute" or not resolution.action:
+        return None
+
+    action = resolution.action
+    if action.startswith("get_"):
+        result = tool.execute(
+            action=action,
+            entity=resolution.entity_id or resolution.entity_name or "",
+            **resolution.parameters,
+        )
+        return result.content
+
+    # The Guardian currently registers only low-consequence, reversible power
+    # commands.  Let other supported Home Assistant intents take the ordinary
+    # agent path until they have a corresponding registered action.
+    if action not in {"turn_on", "turn_off"} or not resolution.entity_id:
+        return None
+
+    guardian = getattr(request.app.state, "guardian", None)
+    if guardian is None:
+        return "Home control is unavailable because the Guardian is not configured."
+
+    action_type = f"home_assistant.{action}"
+    session_id = _chat_conversation_id(request_body, request)
+    action_id = uuid.uuid4().hex
+    grant_id = f"chat-home-{action_id}"
+    target = resolution.entity_id
+    try:
+        # A typed imperative from this chat is the user's explicit authority,
+        # not a standing permission: the grant is exact, expires quickly, and
+        # cannot be reused for another target or action.
+        guardian.grant(
+            grant_id=grant_id,
+            session_id=session_id,
+            capability="home.assistant.write",
+            scope={"action_type": action_type, "target": target},
+            expires_in_seconds=60,
+        )
+        proposal = ActionProposal(
+            id=action_id,
+            action_type=action_type,
+            description=query,
+            parameters={"target": target},
+            idempotency_key=f"chat-home:{action_id}",
+            provenance={"component": "server.chat", "authority": "typed-command"},
+        )
+        decision = guardian.authorize(proposal, session_id=session_id, authority="Marc")
+        if not decision.allowed:
+            return (
+                f"I couldn't {action.replace('_', ' ')} "
+                f"{resolution.entity_name or target}: {decision.reason}."
+            )
+        result = guardian.execute(action_id, decision.authorization, verify=False)
+    except Exception:
+        logging.getLogger("openjarvis.server").exception(
+            "Guardian Home Assistant command failed"
+        )
+        return "I couldn't reach Home Assistant, so I did not confirm a device change."
+
+    if result.outcome.success:
+        return f"{resolution.entity_name or target}: command sent."
+    return f"I couldn't {action.replace('_', ' ')} {resolution.entity_name or target}."
+
+
+def _try_arm_departure_watcher_from_chat(
+    request_body: ChatCompletionRequest,
+    request: Request,
+) -> tuple[str, dict[str, Any]] | None:
+    """Handle the bounded departure command before model inference."""
+
+    intent = parse_departure_watcher_request(_last_user_query(request_body))
+    if intent is None:
+        return None
+
+    result = arm_departure_watcher_from_chat(
+        intent=intent,
+        service=getattr(request.app.state, "departure_watcher_service", None),
+        conversation_id=_chat_conversation_id(request_body, request),
+    )
+    return format_departure_watcher_chat_result(result), result
 
 
 def _available_local_models(engine: Any) -> list[str]:
@@ -495,6 +801,79 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         request_body.model = model
     else:
         model = requested_model
+
+    # The Ophanim chat UI uses this endpoint directly.  Arm the bounded,
+    # safety-critical departure watcher deterministically before asking a
+    # model to answer, so a watcher request never depends on tool selection or
+    # an agent loop.  Non-matching messages continue through the normal chat
+    # path unchanged.
+    departure_chat = _try_arm_departure_watcher_from_chat(request_body, request)
+    if departure_chat is not None:
+        departure_content, _departure_result = departure_chat
+        query = _last_user_query(request_body)
+        if request_body.stream:
+            return await _handle_departure_watcher_stream(
+                model,
+                departure_content,
+                query=query,
+                bus=getattr(request.app.state, "bus", None),
+                memory_service=getattr(request.app.state, "memory_service", None),
+            )
+        response = ChatCompletionResponse(
+            model=model,
+            choices=[
+                Choice(
+                    message=ChoiceMessage(
+                        role="assistant",
+                        content=departure_content,
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=UsageInfo(),
+        )
+        _remember_exchange(
+            getattr(request.app.state, "memory_service", None),
+            query,
+            response,
+            bus=getattr(request.app.state, "bus", None),
+            source="server.chat.departure_watcher",
+        )
+        return response
+
+    # Do not leave explicit home-control commands to a best-effort model tool
+    # decision.  This route resolves only unambiguous intents and delegates any
+    # write through Guardian for scoped authorization and read-back verification.
+    home_chat = _try_handle_home_assistant_chat_intent(request_body, request)
+    if home_chat is not None:
+        query = _last_user_query(request_body)
+        if request_body.stream:
+            return await _handle_clock_stream(
+                model,
+                home_chat,
+                query=query,
+                bus=getattr(request.app.state, "bus", None),
+                memory_service=getattr(request.app.state, "memory_service", None),
+                source="server.chat.home_assistant",
+            )
+        response = ChatCompletionResponse(
+            model=model,
+            choices=[
+                Choice(
+                    message=ChoiceMessage(role="assistant", content=home_chat),
+                    finish_reason="stop",
+                )
+            ],
+            usage=UsageInfo(),
+        )
+        _remember_exchange(
+            getattr(request.app.state, "memory_service", None),
+            query,
+            response,
+            bus=getattr(request.app.state, "bus", None),
+            source="server.chat.home_assistant",
+        )
+        return response
 
     # Do not ask a language model to decide whether the server's clock is
     # correct. Direct clock lookups are answered from the local clock tool so
@@ -1067,6 +1446,60 @@ def _handle_agent(
     )
 
 
+async def _handle_departure_watcher_stream(
+    model: str,
+    content: str,
+    *,
+    query: str,
+    bus=None,
+    memory_service=None,
+):
+    """Stream a deterministic watcher confirmation through the normal UI."""
+
+    chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+
+    async def generate():
+        first_chunk = ChatCompletionChunk(
+            id=chunk_id,
+            model=model,
+            choices=[StreamChoice(delta=DeltaMessage(role="assistant"))],
+        )
+        yield f"data: {first_chunk.model_dump_json()}\n\n"
+
+        content_chunk = ChatCompletionChunk(
+            id=chunk_id,
+            model=model,
+            choices=[StreamChoice(delta=DeltaMessage(content=content))],
+        )
+        yield f"data: {content_chunk.model_dump_json()}\n\n"
+
+        finish_chunk = ChatCompletionChunk(
+            id=chunk_id,
+            model=model,
+            choices=[
+                StreamChoice(
+                    delta=DeltaMessage(),
+                    finish_reason="stop",
+                )
+            ],
+        )
+        yield f"data: {finish_chunk.model_dump_json()}\n\n"
+        _record_completed_exchange(
+            memory_service,
+            query,
+            content,
+            bus=bus,
+            source="server.chat.departure_watcher",
+        )
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 async def _handle_clock_stream(
     model: str,
     content: str,
@@ -1074,6 +1507,7 @@ async def _handle_clock_stream(
     query: str,
     bus=None,
     memory_service=None,
+    source: str = "server.chat.clock",
 ):
     """Stream a deterministic clock answer using the normal SSE shape."""
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -1109,7 +1543,7 @@ async def _handle_clock_stream(
             query,
             content,
             bus=bus,
-            source="server.chat.clock",
+            source=source,
         )
         yield "data: [DONE]\n\n"
 

@@ -127,6 +127,7 @@ export interface ChatMessage {
   usage?: TokenUsage;
   telemetry?: MessageTelemetry;
   audio?: { url: string };
+  acceptanceMode?: boolean;
 }
 
 export interface Conversation {

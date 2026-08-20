@@ -138,6 +138,14 @@ class Situation(CognitionContract):
     contract_type: ClassVar[str] = "situation"
     situation_type: str = ""
     evidence_ids: list[str] = field(default_factory=list)
+    status: str = "active"
+    uncertainty: list[str] = field(default_factory=list)
+    source_provenance: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.status not in {"active", "uncertain", "closed"}:
+            raise ContractError(f"unsupported situation status: {self.status}")
 
 
 @dataclass
@@ -266,6 +274,10 @@ def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
     raw.setdefault("sensitivity_labels", [])
     raw.setdefault("taint_labels", [])
     raw.setdefault("confidence", None)
+    if raw.get("contract_type") == "situation":
+        raw.setdefault("status", "active")
+        raw.setdefault("uncertainty", [])
+        raw.setdefault("source_provenance", {})
     if not raw.get("contract_type"):
         raise ContractCompatibilityError(
             "incompatible contract: contract_type is missing"

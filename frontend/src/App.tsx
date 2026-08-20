@@ -81,7 +81,13 @@ export default function App() {
 
   // Fetch server info
   useEffect(() => {
-    fetchServerInfo().then(setServerInfo).catch(() => {});
+    fetchServerInfo().then((info) => {
+      setServerInfo(info);
+      // A previous browser session can leave a stale model in localStorage.
+      // The running server is the source of truth on first load; after this
+      // sync, an intentional model selection from the UI is preserved.
+      if (info.model) setSelectedModel(info.model);
+    }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll savings and optionally share to Supabase
@@ -188,8 +194,9 @@ export default function App() {
       <UpdateChecker />
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<OperationsPage />} />
+          <Route index element={<ChatPage />} />
           <Route path="chat" element={<ChatPage />} />
+          <Route path="operations" element={<OperationsPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="get-started" element={<GetStartedPage />} />

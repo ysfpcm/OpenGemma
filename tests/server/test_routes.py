@@ -1142,3 +1142,123 @@ class TestTraceRecording:
         assert trace.query == "stream please"
         # _make_engine streams "Hello", " ", "world".
         assert trace.result == "Hello world"
+
+
+class TestDeterministicHomeControl:
+    def test_audio_speaker_clarification_survives_a_latest_message_only_reply(
+        self, monkeypatch
+    ) -> None:
+        """The server, not client transcript replay, owns a pending command."""
+        from openjarvis.server.routes import _PENDING_AUDIO_COMMANDS
+        from openjarvis.tools.home_assistant import HomeAssistantTool
+
+        _PENDING_AUDIO_COMMANDS.clear()
+        monkeypatch.setenv("OPHANIM_ALEXA_KITCHEN_DEVICE_ID", "kitchen-device")
+        monkeypatch.setenv("OPHANIM_ALEXA_MAIN_BEDROOM_DEVICE_ID", "main-device")
+        monkeypatch.setenv("OPHANIM_ALEXA_BEDROOM_DEVICE_ID", "bedroom-device")
+        calls: list[tuple[str, str, dict]] = []
+        monkeypatch.setattr(
+            HomeAssistantTool,
+            "_request",
+            lambda _self, method, path, body=None: calls.append((method, path, body)) or [],
+        )
+
+        app = create_app(_make_engine(), "test-model", config=_test_config())
+        client = TestClient(app)
+        first = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "conversation_id": "audio-clarification",
+                "messages": [{"role": "user", "content": "play rain sounds"}],
+            },
+        )
+        assert "Which speaker should I use" in first.json()["choices"][0]["message"]["content"]
+
+        second = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "conversation_id": "audio-clarification",
+                "messages": [{"role": "user", "content": "kitchen echo dot"}],
+            },
+        )
+        assert second.json()["choices"][0]["message"]["content"] == "Kitchen Echo Dot: command sent."
+        assert calls == [
+            (
+                "POST",
+                "/api/services/alexa_devices/send_text_command",
+                {"device_id": "kitchen-device", "text_command": "play rain sounds"},
+            )
+        ]
+
+    def test_device_clarification_restores_the_pending_action(self) -> None:
+        from openjarvis.server.models import ChatCompletionRequest, ChatMessage
+        from openjarvis.server.routes import _home_intent_query
+
+        request = ChatCompletionRequest(
+            model="test-model",
+            messages=[
+                ChatMessage(role="user", content="turn off the lamp"),
+                ChatMessage(
+                    role="assistant",
+                    content=(
+                        "Which device do you mean: Maverick's Room Lamp or "
+                        "Marc's Lamp or Living Room Lamp?"
+                    ),
+                ),
+                ChatMessage(role="user", content="living room lamp"),
+            ],
+        )
+
+        assert _home_intent_query(request) == "turn off the lamp living room lamp"
+
+    def test_explicit_lamp_command_uses_guardian_and_skips_model(
+        self, monkeypatch
+    ) -> None:
+        """A clear chat command must reach HA even when the model refuses tools."""
+        from openjarvis.tools.home_assistant import HomeAssistantTool
+
+        initial = {
+            "entity_id": "light.living_room_lamp",
+            "state": "off",
+            "attributes": {"friendly_name": "Living Room Lamp"},
+        }
+        service_calls: list[tuple[str, str, str]] = []
+
+        monkeypatch.setattr(HomeAssistantTool, "_get_states", lambda self: [initial])
+        monkeypatch.setattr(
+            HomeAssistantTool,
+            "_request",
+            lambda self, *_args, **_kwargs: initial,
+        )
+        monkeypatch.setattr(
+            HomeAssistantTool,
+            "_call_service",
+            lambda self, domain, service, entity_id: service_calls.append(
+                (domain, service, entity_id)
+            ),
+        )
+
+        engine = _make_engine(content="I do not have the capability to control it.")
+        agent = _make_agent(content="I do not have the capability to control it.")
+        app = create_app(engine, "test-model", agent=agent, config=_test_config())
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [
+                    {"role": "user", "content": "Turn on the Living Room Lamp"}
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["choices"][0]["message"]["content"] == (
+            "Living Room Lamp: command sent."
+        )
+        assert service_calls == [("light", "turn_on", "light.living_room_lamp")]
+        agent.run.assert_not_called()
+        engine.generate.assert_not_called()

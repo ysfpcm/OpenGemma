@@ -4,6 +4,7 @@ import { getBase, authHeaders } from './api';
 export interface ChatRequest {
   model: string;
   messages: Array<{ role: string; content: string }>;
+  conversation_id?: string;
   stream: true;
   temperature?: number;
   max_tokens?: number;
@@ -106,4 +107,3 @@ export async function* streamResearch(
     reader.releaseLock();
   }
 }
-

@@ -1031,6 +1031,9 @@ class ServerConfig:
     agent: str = "orchestrator"
     model: str = ""
     workers: int = 1
+    # Local directories where the Codex observer may create or observe
+    # missions. An empty list keeps the bridge disabled rather than guessing.
+    codex_observer_roots: list[str] = field(default_factory=list)
     cors_origins: list = field(
         default_factory=lambda: [
             "http://localhost:3000",

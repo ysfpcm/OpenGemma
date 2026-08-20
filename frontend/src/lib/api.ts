@@ -1,5 +1,5 @@
 import type { ContextSnapshot, ModelInfo, SavingsData, ServerInfo } from '../types';
-import type { CodexMission, ContextInspect } from '../types/operations';
+import type { CodexMission, ContextInspect, GuardianTimeline, ShadowSituationView } from '../types/operations';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './supabase';
 
 // ---------------------------------------------------------------------------
@@ -152,6 +152,114 @@ export async function fetchCodexMission(id: string): Promise<CodexMission> {
   const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}`);
   if (!response.ok) throw new Error(`Unable to load Codex mission (${response.status})`);
   return await response.json() as CodexMission;
+}
+
+export async function startCodexMission(input: {
+  objective: string;
+  workspace: string;
+  mode: 'read-only' | 'workspace-write';
+  budgets?: Record<string, number>;
+}): Promise<CodexMission> {
+  const response = await apiFetch('/v1/codex/missions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(`Unable to start Codex mission (${response.status})`);
+  return await response.json() as CodexMission;
+}
+
+export async function steerCodexMission(id: string, text: string): Promise<CodexMission> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}/steer`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+  });
+  if (!response.ok) throw new Error(`Unable to steer Codex mission (${response.status})`);
+  return await response.json() as CodexMission;
+}
+
+export async function interruptCodexMission(id: string): Promise<CodexMission> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}/interrupt`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Unable to interrupt Codex mission (${response.status})`);
+  return await response.json() as CodexMission;
+}
+
+export async function resumeCodexMission(id: string, instruction: string): Promise<CodexMission> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}/resume-turn`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instruction }),
+  });
+  if (!response.ok) throw new Error(`Unable to resume Codex mission (${response.status})`);
+  return await response.json() as CodexMission;
+}
+
+export async function forkCodexMission(id: string): Promise<CodexMission> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}/fork`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Unable to fork Codex mission (${response.status})`);
+  return await response.json() as CodexMission;
+}
+
+export async function requestCodexCheckpoint(id: string): Promise<CodexMission> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}/checkpoint`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Unable to request Codex checkpoint (${response.status})`);
+  return await response.json() as CodexMission;
+}
+
+export async function resolveCodexDecision(
+  missionId: string,
+  decisionId: string,
+  payload: { decision?: string; answers?: Record<string, unknown>; content?: Record<string, unknown> },
+): Promise<CodexDecision> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(missionId)}/decisions/${encodeURIComponent(decisionId)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`Unable to resolve Codex decision (${response.status})`);
+  return await response.json() as CodexDecision;
+}
+
+export async function fetchGuardianTimeline(actionId: string): Promise<GuardianTimeline> {
+  const response = await apiFetch(`/v1/guardian/actions/${encodeURIComponent(actionId)}`);
+  if (!response.ok) throw new Error(`Unable to load Guardian action (${response.status})`);
+  return await response.json() as GuardianTimeline;
+}
+
+export async function fetchShadowSituations(): Promise<ShadowSituationView> {
+  const response = await apiFetch('/v1/situations');
+  if (!response.ok) throw new Error(`Unable to load shadow situations (${response.status})`);
+  return await response.json() as ShadowSituationView;
+}
+
+export async function compareCodexForks(id: string, otherId: string): Promise<CodexForkComparison> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}/compare/${encodeURIComponent(otherId)}`);
+  if (!response.ok) throw new Error(`Unable to compare Codex forks (${response.status})`);
+  return await response.json() as CodexForkComparison;
+}
+
+export async function selectCodexFork(id: string, forkId: string): Promise<CodexMission> {
+  const response = await apiFetch(`/v1/codex/missions/${encodeURIComponent(id)}/select-fork/${encodeURIComponent(forkId)}`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Unable to select Codex fork (${response.status})`);
+  return await response.json() as CodexMission;
+}
+
+export interface CodexDecision {
+  id: string;
+  mission_id: string;
+  request_id: string;
+  request_method: string;
+  kind: string;
+  status: string;
+  requested: Record<string, unknown>;
+  offered: { decision_values?: string[]; question_ids?: string[]; scope_values?: string[] };
+  guardian_allowed: boolean;
+  guardian_allows: boolean;
+  guardian_reason: string;
+  codex_requested: boolean;
+  marc_approved: boolean;
+  marc_decision: Record<string, unknown> | null;
+}
+
+export interface CodexForkComparison {
+  parent_mission_id: string;
+  left_mission_id: string;
+  right_mission_id: string;
+  changed_files: Array<{ path: string; left?: string; right?: string }>;
+  workspace_mutated: boolean;
 }
 
 async function tauriInvoke<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -369,39 +477,6 @@ export async function checkHealth(): Promise<boolean> {
   return probe('/v1/connectors');
 }
 
-export async function fetchEnergy(): Promise<unknown> {
-  if (isTauri()) {
-    try {
-      return await tauriInvoke('fetch_energy', { apiUrl: getBase() });
-    } catch {}
-  }
-  const res = await apiFetch(`/v1/telemetry/energy`);
-  if (!res.ok) throw new Error(`Failed: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchTelemetry(): Promise<unknown> {
-  if (isTauri()) {
-    try {
-      return await tauriInvoke('fetch_telemetry', { apiUrl: getBase() });
-    } catch {}
-  }
-  const res = await apiFetch(`/v1/telemetry/stats`);
-  if (!res.ok) throw new Error(`Failed: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchTraces(limit: number = 50): Promise<unknown> {
-  if (isTauri()) {
-    try {
-      return await tauriInvoke('fetch_traces', { apiUrl: getBase(), limit });
-    } catch {}
-  }
-  const res = await apiFetch(`/v1/traces?limit=${limit}`);
-  if (!res.ok) throw new Error(`Failed: ${res.status}`);
-  return res.json();
-}
-
 // ---------------------------------------------------------------------------
 // Speech
 // ---------------------------------------------------------------------------
@@ -517,31 +592,6 @@ export interface ManagedAgent {
   current_activity?: string;
 }
 
-export interface ManagedAgentRunStatus {
-  id: string;
-  name: string;
-  status: ManagedAgent['status'];
-  overall_status: 'ok' | 'running' | 'error' | 'action_failed';
-  current_activity: string;
-  last_run_at: number | null;
-  last_outcome: 'success' | 'error' | null;
-  next_run_at: number | null;
-  schedule_type: string;
-  schedule_value: string | number;
-  last_tool_result: {
-    tool: string;
-    success: boolean | null;
-    result: string;
-    latency: number | null;
-  } | null;
-  delivery_result: {
-    status: 'sent' | 'failed';
-    tool: string;
-    detail: string;
-  } | null;
-  failure_reason: string | null;
-}
-
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -591,13 +641,6 @@ export interface AgentMessage {
 
 export async function fetchManagedAgents(): Promise<ManagedAgent[]> {
   const res = await apiFetch(`/v1/managed-agents`);
-  if (!res.ok) throw new Error(`Failed: ${res.status}`);
-  const data = await res.json();
-  return data.agents || [];
-}
-
-export async function fetchManagedAgentStatuses(): Promise<ManagedAgentRunStatus[]> {
-  const res = await apiFetch(`/v1/managed-agents/status`);
   if (!res.ok) throw new Error(`Failed: ${res.status}`);
   const data = await res.json();
   return data.agents || [];

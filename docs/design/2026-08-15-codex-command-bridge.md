@@ -3,13 +3,18 @@
 > **Implementation source of truth:** [Ophanim Master Implementation Plan](2026-08-15-ophanim-master-implementation-plan.md). This document is retained as Codex Bridge design rationale.
 
 **Subtitle:** A personal mission-control layer for long-running work on Marc's PC  
-**Status:** Proposed first digital embodiment  
+**Status:** Architecture rationale; live execution is a later readiness milestone
 **Date:** 2026-08-15  
 **Companion plans:** [Cognitive Architecture Roadmap](2026-08-15-cognitive-architecture-roadmap.md) · [Guardian Loop](2026-08-15-guardian-loop-plan.md)
 
+The system-level local-computer architecture is specified in
+[Codex local-computer integration architecture](2026-08-15-codex-local-computer-architecture.md).
+
 ## Product decision
 
-Ophanim should integrate with Codex as a supervised cognitive and execution subsystem.
+Ophanim should integrate with Codex as a supervised cognitive and execution
+subsystem, behind a paired local resident and provider-neutral mission
+contracts.
 
 Ophanim owns:
 
@@ -30,7 +35,7 @@ The result is not “Ophanim secretly watches a terminal.” It is a deliberate 
 
 > Marc gives Ophanim a mission → Ophanim starts or resumes a Codex thread → Codex streams observable work → Ophanim summarizes progress and routes decisions → Marc can steer, pause, approve, or stop → Guardian verifies the outcome.
 
-## Why App Server is the primary integration
+## Why App Server is a provider, not the whole integration
 
 The installed Codex CLI supports:
 
@@ -43,13 +48,20 @@ The installed Codex CLI supports:
 - Command, file-change, network, permission, tool, and user-input approval requests.
 - Generated TypeScript and JSON Schema bindings tied to the installed Codex version.
 
-Use `codex exec --json` for isolated scheduled jobs. Use App Server for interactive, observable, steerable missions.
+Use `codex exec --json` for isolated scheduled jobs. Use App Server for
+interactive, observable, steerable missions when it is operationally ready.
+Neither transport replaces the local resident, remote control session,
+computer-use adapter, Guardian, or independent verification path.
 
 Do not tail terminal escape sequences, scrape screen pixels, or parse prose written for humans when a structured protocol exists.
 
 ## Important limitation
 
-Ophanim can reliably stream a Codex mission that Ophanim launched or resumed through its bridge. It should not promise to attach invisibly to any arbitrary Codex TUI already running in another terminal.
+Ophanim can reliably stream a Codex mission that Ophanim launched or resumed
+through its bridge. It should not promise to attach invisibly to any arbitrary
+Codex TUI already running in another terminal. Local computer use is a
+separate typed adapter owned by the resident; it is not implemented by scraping
+terminal output or granting a model an unrestricted shell.
 
 Existing persisted Codex threads may be listed or resumed through supported thread APIs. Real-time supervision begins once the bridge owns the active App Server connection and subscription.
 

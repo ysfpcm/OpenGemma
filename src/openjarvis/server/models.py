@@ -24,6 +24,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
+    conversation_id: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 1024
     stream: bool = False

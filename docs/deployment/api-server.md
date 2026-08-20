@@ -193,7 +193,7 @@ HTTP 503:
 
 ### `GET /dashboard`
 
-Serves the built-in Savings Dashboard, an HTML page that displays real-time statistics on inference calls served locally and estimated cost savings compared to cloud API providers. The dashboard auto-refreshes every 5 seconds by polling the `/v1/savings` endpoint.
+Serves the built React system dashboard. It provides live runtime events, local-memory context, connected-source status, and read-only database inspection. The page refreshes through the SPA shell and keeps its live panels connected to the system APIs.
 
 ### `GET /v1/channels`
 

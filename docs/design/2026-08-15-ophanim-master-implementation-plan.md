@@ -13,6 +13,7 @@ This document combines the complete direction established in:
 - [Ophanim Guardian Loop](2026-08-15-guardian-loop-plan.md)
 - [Ophanim Cognitive Architecture Roadmap](2026-08-15-cognitive-architecture-roadmap.md)
 - [Ophanim Codex Command Bridge](2026-08-15-codex-command-bridge.md)
+- [Codex local-computer integration architecture](2026-08-15-codex-local-computer-architecture.md)
 
 Those documents remain the design rationale. This file is the implementation source of truth: what to build, in what order, how each part connects, and how Marc can tangibly test every phase before proceeding.
 
@@ -322,6 +323,28 @@ While Codex works, Marc should see Ophanim produce deduplicated milestone update
 
 **Goal:** Let Marc remain in control of long-running Codex work without remaining at the terminal.
 
+**Status:** accepted by Marc on 2026-08-16 (America/New_York), with deferred
+operational follow-up `P2-LIVE-01`. The implementation and deterministic
+isolated-fixture exit-gate tests pass; the Operations mission-start flow and a
+live read-only Codex thread are enabled for the Ophanim workspace. The review was
+against an uncommitted working tree that also contains unrelated phase changes.
+Exact evidence and rollback instructions are in `docs/evidence/phase-2/README.md`.
+
+**Deferred follow-up — P2-LIVE-01 (non-blocking by Marc):** The installed Codex
+App Server can create a scoped thread but may delay its `turn/start` acknowledgement
+until desktop MCP tooling initializes. Ophanim records that outcome honestly as a
+timeout, so live turn-ID binding and the full start/steer/checkpoint/finish demo must
+be completed before relying on Mission Control for consequential work. This does not
+weaken the sandbox, network, root, budget, or approval boundaries, and is explicitly
+deferred while Phase 3 proceeds.
+
+**Architecture direction:** The forward Codex design is now the design-only
+[local-computer integration architecture](2026-08-15-codex-local-computer-architecture.md).
+It treats a paired Windows Ophanim resident, authenticated remote control,
+typed computer-use adapters, and provider-neutral mission contracts as the
+core system. A live App Server turn is an operational readiness milestone, not
+a prerequisite for the broader architecture or later phases.
+
 ## Build
 
 - Steer an active turn.
@@ -353,22 +376,38 @@ During the mission:
 
 ## Exit gate
 
-- [ ] Steer applies only to the intended active turn.
-- [ ] Interrupt stops work and produces an honest terminal state.
-- [ ] Resume preserves context without repeating completed effects.
-- [ ] Forks cannot contaminate each other's workspace or authority.
-- [ ] Declined requests remain declined and cannot be retried under a wider interpretation.
-- [ ] Budgets stop or escalate work at the configured boundary.
-- [ ] No credential or raw sensitive payload appears in notifications.
-- [ ] Marc can determine exactly what changed and undo the fixture result.
+- [x] Steer applies only to the intended active turn.
+- [x] Interrupt stops work and produces an honest terminal state.
+- [x] Resume preserves context without repeating completed effects.
+- [x] Forks cannot contaminate each other's workspace or authority.
+- [x] Declined requests remain declined and cannot be retried under a wider interpretation.
+- [x] Budgets stop or escalate work at the configured boundary.
+- [x] No credential or raw sensitive payload appears in notifications.
+- [x] Marc can determine exactly what changed and undo the fixture result.
 
 ## First real use after passing
 
-Use Observe or Navigate mode for an Ophanim documentation or test-improvement mission. Do not let the bridge modify its own authorization code yet.
+Use Observe or Navigate mode for an Ophanim documentation or test-improvement
+mission. Do not let the bridge modify its own authorization code yet. The next
+Codex work should implement and fixture-test the local-computer architecture;
+it does not need to prove a live App Server turn first.
 
 # Phase 3 — Guardian Kernel and verified action runtime
 
 **Goal:** Create a non-bypassable control plane shared by Codex, Home Assistant, connectors, and future embodiments.
+
+**Status:** accepted by Marc on 2026-08-16 (America/New_York), after the Phase 3
+review and technical verification. The typed registry,
+scoped grants/revocation, emergency stop, fresh-precondition enforcement,
+independent verification, Codex native-protocol authorization handoff,
+reversible Home Assistant adapter, causal-timeline API/UI, restart durability,
+immutable audit records, and deterministic fixture scenarios pass. The Codex
+integration remains an architectural/provider boundary; live App Server use is
+not a Phase 3 acceptance requirement. Deferred follow-up remains live external
+Home Assistant/Codex validation and broader private-helper cleanup.
+
+The current Phase 3 audit and acceptance are recorded in
+[the 2026-08-16 review addendum](../evidence/phase-3/review-2026-08-16.md).
 
 ## Build
 
@@ -425,14 +464,14 @@ Use test adapters for both a Codex workspace action and a Home Assistant-like st
 
 ## Exit gate
 
-- [ ] Unknown action types fail closed.
-- [ ] Missing, stale, or contradictory preconditions prevent execution.
-- [ ] A denial cannot be transformed into a new equivalent action.
-- [ ] Timeout-after-effect does not cause a duplicate retry.
-- [ ] Revocation takes effect before the next side effect.
-- [ ] Successful actions are verified or explicitly marked unverified.
-- [ ] Audit and UI reconstruct the complete authorization and effect chain.
-- [ ] Emergency stop outranks all lower-level goals.
+- [x] Unknown action types fail closed.
+- [x] Missing, stale, or contradictory preconditions prevent execution.
+- [x] A denial cannot be transformed into a new equivalent action.
+- [x] Timeout-after-effect does not cause a duplicate retry.
+- [x] Revocation takes effect before the next side effect.
+- [x] Successful actions are verified or explicitly marked unverified.
+- [x] Audit and UI reconstruct the complete authorization and effect chain.
+- [x] Emergency stop outranks all lower-level goals.
 
 ## Do not include yet
 
@@ -443,6 +482,11 @@ Use test adapters for both a Codex workspace action and a Home Assistant-like st
 # Phase 4 — Durable events and shadow situations
 
 **Goal:** Let Ophanim notice meaningful situations reliably without taking action.
+
+**Implementation reference:** [Phase 4 durable events and shadow situations](2026-08-15-phase-4-durable-events-shadow-situations.md)
+and [Phase 4 evidence](../evidence/phase-4/README.md). The deterministic fixture
+slice was accepted by Marc on 2026-08-16; the seven-day live-shadow gate and
+real source adapters remain deliberately deferred follow-up.
 
 ## Build
 
@@ -490,17 +534,23 @@ Operations should show what situation Ophanim would have created and why, but no
 
 ## Exit gate
 
-- [ ] Each valid scenario creates exactly one expected situation.
-- [ ] Negative scenarios remain silent.
-- [ ] Stale evidence is visible and blocks confidence-sensitive detection.
-- [ ] Cancellation closes the situation.
-- [ ] Restart and replay do not duplicate situations.
-- [ ] Dead-letter events are visible and recoverable.
+- [x] Each valid scenario creates exactly one expected situation.
+- [x] Negative scenarios remain silent.
+- [x] Stale evidence is visible and blocks confidence-sensitive detection.
+- [x] Cancellation closes the situation.
+- [x] Restart and replay do not duplicate situations.
+- [x] Dead-letter events are visible and recoverable.
 - [ ] Seven days of shadow use produce no unexplained duplicate situations before live suggestions begin.
 
 # Phase 5 — Living World Model and layered memory
 
 **Goal:** Give Ophanim grounded continuity instead of disconnected context stores and summaries.
+
+**Implementation reference:** [Phase 5 Living World Model and layered memory](2026-08-15-phase-5-living-world-layered-memory.md)
+and [Phase 5 evidence](../evidence/phase-5/README.md). The additive deterministic
+fixture slice was **accepted by Marc on 2026-08-16 (America/New_York)** after
+the Phase 5 review. Live personal-history sources, connector consolidation,
+confidence calibration, and real-world validation remain deferred.
 
 ## Build
 
@@ -576,6 +626,10 @@ Use a deliberately contradictory personal-project fixture:
 
 **Goal:** Turn situations and goals into inspectable plans whose permissions mean exactly what Marc expects.
 
+**Status:** accepted by Marc on 2026-08-16 (America/New_York) for the
+deterministic local slice. Deferred follow-up: live source validation and
+real-world execution remain Phase 7 concerns.
+
 ## Build
 
 ### Typed planner
@@ -627,13 +681,13 @@ Then:
 
 ## Exit gate
 
-- [ ] The edited plan is a new version and the removed action cannot reappear silently.
-- [ ] Stale or changed conditions expire/cancel the plan.
-- [ ] The contextual grant authorizes only the intended target and situation.
-- [ ] High-consequence action remains separately approved.
-- [ ] Marc can see the evidence, expected effect, and exact authority before approval.
-- [ ] Unknown and malformed plans fail closed.
-- [ ] Plans can be canceled without leaving orphaned scheduled effects.
+- [x] The edited plan is a new version and the removed action cannot reappear silently.
+- [x] Stale or changed conditions expire/cancel the plan.
+- [x] The contextual grant authorizes only the intended target and situation.
+- [x] High-consequence action remains separately approved.
+- [x] Marc can see the evidence, expected effect, and exact authority before approval.
+- [x] Unknown and malformed plans fail closed.
+- [x] Plans can be canceled without leaving orphaned scheduled effects.
 
 ## Go/no-go checkpoint
 
@@ -693,6 +747,11 @@ Example successful result:
 # Phase 8 — Cognitive Executive and specialist council
 
 **Goal:** Move from isolated agents to a persistent executive capable of advancing longer objectives.
+
+**Status:** accepted by Marc on 2026-08-16 (America/New_York) after the Phase
+8 review. Deferred follow-up: live Codex/production RAG validation and broader
+generic executive idempotency remain outside this frozen deterministic
+acceptance scenario.
 
 ## Build
 
@@ -761,13 +820,13 @@ Run the same objective with the best existing single-agent path as a baseline.
 
 ## Exit gate
 
-- [ ] Goal state survives restart without replaying completed subgoals.
-- [ ] Specialists receive minimum sufficient context.
-- [ ] Claims retain evidence and confidence.
-- [ ] Executive escalates genuine missing information.
-- [ ] Guardian blocks authority expansion even if specialists agree.
-- [ ] The executive path beats the single-agent baseline on success or verification without unacceptable cost/intervention increase.
-- [ ] Marc sees one coherent Ophanim narrative.
+- [x] Goal state survives restart without replaying completed subgoals.
+- [x] Specialists receive minimum sufficient context.
+- [x] Claims retain evidence and confidence.
+- [x] Executive escalates genuine missing information.
+- [x] Guardian blocks authority expansion even if specialists agree.
+- [x] The executive path beats the single-agent baseline on success or verification without unacceptable cost/intervention increase.
+- [x] Marc sees one coherent Ophanim narrative.
 
 # Phase 9 — Imagination Engine and digital twin
 

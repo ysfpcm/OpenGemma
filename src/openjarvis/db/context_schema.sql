@@ -120,3 +120,129 @@ CREATE INDEX IF NOT EXISTS idx_context_snapshots_time
 
 CREATE INDEX IF NOT EXISTS idx_context_snapshots_entity_time
     ON context_snapshots(entity_id, captured_at DESC);
+
+-- One-time, evidence-first departure watchers.  These tables intentionally
+-- live beside the connected-world context tables so a watcher can never
+-- claim an observation that was not durably ingested first.
+CREATE TABLE IF NOT EXISTS departure_watchers (
+    watcher_id          TEXT PRIMARY KEY,
+    conversation_id     TEXT NOT NULL,
+    created_at           TEXT NOT NULL,
+    armed_at             TEXT NOT NULL,
+    expires_at           TEXT NOT NULL,
+    status               TEXT NOT NULL CHECK (status IN (
+                            'ACTIVE', 'TRIGGERED', 'COMPLETED', 'EXPIRED',
+                            'CANCELED', 'NEEDS_ATTENTION'
+                        )),
+    mode                 TEXT NOT NULL CHECK (mode IN ('simulation', 'live')),
+    fire_count           INTEGER NOT NULL DEFAULT 0 CHECK (fire_count >= 0),
+    trigger_json         TEXT NOT NULL,
+    action_json          TEXT NOT NULL,
+    permissions_json     TEXT NOT NULL,
+    cancellation_reason  TEXT,
+    cancelled_at         TEXT,
+    triggered_at         TEXT,
+    completed_at         TEXT,
+    last_error           TEXT,
+    updated_at           TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS departure_watcher_triggers (
+    watcher_id       TEXT PRIMARY KEY REFERENCES departure_watchers(watcher_id)
+                     ON DELETE CASCADE,
+    trigger_type     TEXT NOT NULL,
+    condition_json   TEXT NOT NULL,
+    created_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS departure_watcher_lifecycle (
+    id               INTEGER PRIMARY KEY,
+    watcher_id       TEXT NOT NULL REFERENCES departure_watchers(watcher_id)
+                     ON DELETE CASCADE,
+    status           TEXT NOT NULL,
+    reason           TEXT NOT NULL DEFAULT '',
+    details_json     TEXT NOT NULL DEFAULT '{}',
+    recorded_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS departure_watcher_events (
+    id               INTEGER PRIMARY KEY,
+    watcher_id       TEXT NOT NULL REFERENCES departure_watchers(watcher_id)
+                     ON DELETE CASCADE,
+    context_event_id INTEGER NOT NULL REFERENCES context_events(id)
+                     ON DELETE CASCADE,
+    home_assistant_event_id TEXT,
+    decision         TEXT NOT NULL,
+    reason           TEXT NOT NULL DEFAULT '',
+    recorded_at      TEXT NOT NULL,
+    UNIQUE (watcher_id, context_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS departure_watcher_evidence (
+    evidence_id      TEXT PRIMARY KEY,
+    watcher_id       TEXT NOT NULL REFERENCES departure_watchers(watcher_id)
+                     ON DELETE CASCADE,
+    context_event_id INTEGER REFERENCES context_events(id) ON DELETE SET NULL,
+    evidence_kind    TEXT NOT NULL,
+    classification   TEXT NOT NULL CHECK (classification IN (
+                            'observed', 'inferred', 'stale', 'uncertain',
+                            'contradictory'
+                        )),
+    source_scope     TEXT NOT NULL,
+    facts_json       TEXT NOT NULL,
+    recorded_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS departure_watcher_device_states (
+    id               INTEGER PRIMARY KEY,
+    watcher_id       TEXT NOT NULL REFERENCES departure_watchers(watcher_id)
+                     ON DELETE CASCADE,
+    phase            TEXT NOT NULL CHECK (phase IN ('pre_action', 'post_action', 'verification')),
+    entity_id        TEXT NOT NULL,
+    state_json       TEXT NOT NULL,
+    classification   TEXT NOT NULL CHECK (classification IN (
+                            'observed', 'inferred', 'stale', 'uncertain',
+                            'contradictory'
+                        )),
+    observed_at      TEXT NOT NULL,
+    recorded_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS departure_watcher_authorizations (
+    id               INTEGER PRIMARY KEY,
+    authorization_id TEXT NOT NULL,
+    watcher_id       TEXT NOT NULL REFERENCES departure_watchers(watcher_id)
+                     ON DELETE CASCADE,
+    action_id        TEXT,
+    decision         TEXT NOT NULL,
+    authority        TEXT NOT NULL,
+    required_json    TEXT NOT NULL DEFAULT '{}',
+    scope_json       TEXT NOT NULL DEFAULT '{}',
+    details_json     TEXT NOT NULL DEFAULT '{}',
+    recorded_at      TEXT NOT NULL,
+    UNIQUE (watcher_id, authorization_id)
+);
+
+CREATE TABLE IF NOT EXISTS departure_watcher_rollbacks (
+    id               INTEGER PRIMARY KEY,
+    watcher_id       TEXT NOT NULL REFERENCES departure_watchers(watcher_id)
+                     ON DELETE CASCADE,
+    action_id        TEXT,
+    method           TEXT NOT NULL,
+    prior_state_json TEXT,
+    status           TEXT NOT NULL,
+    details_json     TEXT NOT NULL DEFAULT '{}',
+    recorded_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_departure_watchers_status_expiry
+    ON departure_watchers(status, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_departure_watcher_events_event
+    ON departure_watcher_events(context_event_id, recorded_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_departure_watcher_evidence_watcher
+    ON departure_watcher_evidence(watcher_id, recorded_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_departure_watcher_device_states_watcher
+    ON departure_watcher_device_states(watcher_id, phase, recorded_at DESC);

@@ -260,6 +260,31 @@ class ActionLedger:
             for row in rows
         ]
 
+    def proposal(self, action_id: str) -> ActionProposal:
+        """Return the immutable proposal that caused an action record."""
+        row = self._conn.execute(
+            "SELECT proposal_json FROM action_records WHERE action_id = ?", (action_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(action_id)
+        return ActionProposal.from_json(row[0])
+
+    def attempts(self, action_id: str) -> list[ActionAttempt]:
+        rows = self._conn.execute(
+            "SELECT body_json FROM action_attempts WHERE action_id = ? "
+            "ORDER BY attempt_number",
+            (action_id,),
+        ).fetchall()
+        return [ActionAttempt.from_json(row[0]) for row in rows]
+
+    def verifications(self, action_id: str) -> list[Verification]:
+        rows = self._conn.execute(
+            "SELECT body_json FROM action_verifications WHERE action_id = ? "
+            "ORDER BY created_at, verification_id",
+            (action_id,),
+        ).fetchall()
+        return [Verification.from_json(row[0]) for row in rows]
+
     def _audit(
         self,
         action_id: str,
@@ -307,6 +332,18 @@ class ActionRuntime:
         self.ledger.transition(action_id, ActionState.EXECUTING, "execution-started")
         try:
             outcome = executor()
+            if (
+                not isinstance(outcome, ExecutionOutcome)
+                or not isinstance(outcome.success, bool)
+                or (
+                    outcome.error is not None
+                    and not isinstance(outcome.error, ActionError)
+                )
+                or (outcome.success and outcome.error is not None)
+            ):
+                outcome = ExecutionOutcome(
+                    False, "executor returned an invalid outcome", ActionError.INVALID
+                )
         except Exception as exc:
             outcome = ExecutionOutcome(False, str(exc), ActionError.TRANSIENT)
         attempt = ActionAttempt(
@@ -325,6 +362,17 @@ class ActionRuntime:
                 action_id,
                 ActionState.EFFECT_PENDING,
                 "tool-reported-success-awaiting-independent-verification",
+                details={"attempt_id": attempt.id},
+            )
+        elif outcome.error is ActionError.AMBIGUOUS_EFFECT:
+            # A timeout or disconnect after dispatch is not evidence that the
+            # side effect failed.  Never retry it automatically; an
+            # independent observer must settle it first.
+            self.ledger.transition(
+                action_id,
+                ActionState.NEEDS_ATTENTION,
+                "executor-outcome-ambiguous-after-possible-effect",
+                error=outcome.error,
                 details={"attempt_id": attempt.id},
             )
         else:

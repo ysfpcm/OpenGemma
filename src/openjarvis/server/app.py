@@ -13,15 +13,30 @@ from fastapi.staticfiles import StaticFiles
 
 from openjarvis.server.analytics_routes import router as analytics_router
 from openjarvis.server.api_routes import include_all_routes
+from openjarvis.server.codex_routes import configure_codex_observer
+from openjarvis.server.codex_routes import router as codex_router
 from openjarvis.server.comparison import comparison_router
-from openjarvis.server.codex_routes import configure_codex_observer, router as codex_router
 from openjarvis.server.connectors_router import create_connectors_router
 from openjarvis.server.dashboard import dashboard_router
+from openjarvis.server.departure_routes import configure_phase7
+from openjarvis.server.departure_routes import router as departure_router
+from openjarvis.server.departure_watcher_routes import configure_departure_watchers
+from openjarvis.server.departure_watcher_routes import (
+    router as departure_watcher_router,
+)
 from openjarvis.server.digest_routes import create_digest_router
+from openjarvis.server.guardian_routes import configure_guardian
+from openjarvis.server.guardian_routes import router as guardian_router
+from openjarvis.server.planning_routes import configure_phase6
+from openjarvis.server.planning_routes import router as planning_router
 from openjarvis.server.research_router import router as research_router
 from openjarvis.server.routes import router
-from openjarvis.server.upload_router import router as upload_router
+from openjarvis.server.situation_routes import configure_phase4
+from openjarvis.server.situation_routes import router as situation_router
 from openjarvis.server.system_metrics_routes import router as system_metrics_router
+from openjarvis.server.upload_router import router as upload_router
+from openjarvis.server.world_routes import configure_phase5
+from openjarvis.server.world_routes import router as world_router
 
 logger = logging.getLogger(__name__)
 
@@ -414,6 +429,18 @@ def create_app(
     app.include_router(research_router)
     app.include_router(analytics_router)
     app.include_router(system_metrics_router)
+    app.include_router(situation_router)
+    configure_phase4(app)
+    app.include_router(world_router)
+    configure_phase5(app)
+    app.include_router(guardian_router)
+    configure_guardian(app)
+    app.include_router(planning_router)
+    configure_phase6(app)
+    app.include_router(departure_router)
+    configure_phase7(app)
+    app.include_router(departure_watcher_router)
+    configure_departure_watchers(app)
     app.include_router(codex_router)
     configure_codex_observer(app)
     include_all_routes(app)

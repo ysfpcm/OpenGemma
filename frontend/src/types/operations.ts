@@ -114,6 +114,68 @@ export interface CodexMission {
   updated_at: string;
   last_meaningful_at: string;
   interrupted_reason: string | null;
+  mode?: 'read-only' | 'workspace-write' | string;
+  budgets?: Record<string, number>;
+  budget_state?: {
+    used?: Record<string, number>;
+    limits?: Record<string, number>;
+    exceeded?: string[];
+  };
+  authority?: {
+    sandbox?: string;
+    approval_policy?: string;
+    network_access?: boolean;
+    writable_roots?: string[];
+  };
+  effects?: Array<Record<string, unknown>>;
+  parent_mission_id?: string | null;
+  selected_fork_id?: string | null;
+  controls?: Array<{ action: string; detail: Record<string, unknown>; recorded_at: string }>;
+  decisions?: Array<{
+    id: string;
+    request_method: string;
+    kind: string;
+    status: string;
+    offered: { decision_values?: string[]; question_ids?: string[] };
+    requested: Record<string, unknown>;
+    guardian_allowed: boolean;
+    guardian_allows: boolean;
+    guardian_reason: string;
+    codex_requested: boolean;
+    marc_approved: boolean;
+    marc_decision: Record<string, unknown> | null;
+  }>;
   milestones?: Array<{ summary: string; event_fingerprint: string; recorded_at: string }>;
   events?: Array<{ id: number; fingerprint: string; method: string; display: Record<string, unknown>; recorded_at: string }>;
+}
+
+export interface GuardianTimeline {
+  proposal: Record<string, unknown>;
+  state: string;
+  attempts: Array<Record<string, unknown>>;
+  verifications: Array<Record<string, unknown>>;
+  action_audit: Array<Record<string, unknown>>;
+  guardian_audit: Array<Record<string, unknown>>;
+}
+
+export interface ShadowSituation {
+  id: string;
+  situation_type: string;
+  status: 'active' | 'uncertain' | 'closed' | string;
+  confidence: number | null;
+  evidence_ids: string[];
+  uncertainty: string[];
+  provenance: Record<string, unknown>;
+  source_provenance: Record<string, unknown>;
+  created_at: string;
+  valid_from: string;
+  valid_until: string | null;
+}
+
+export interface ShadowSituationView {
+  mode: 'shadow' | string;
+  situations: ShadowSituation[];
+  evaluations: Array<Record<string, unknown>>;
+  dead_letters: Array<Record<string, unknown>>;
+  side_effects: false;
 }

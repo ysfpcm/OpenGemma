@@ -39,10 +39,15 @@ class CodexAppServerClient:
         executable: str = "codex",
         *,
         on_notification: Optional[Callable] = None,
+        on_request: Optional[Callable] = None,
         on_exit: Optional[Callable[[int], None]] = None,
     ) -> None:
         self.executable = resolve_executable(executable)
         self.on_notification = on_notification or (lambda method, params: None)
+        # Server requests are denied unless the supervisor explicitly installs
+        # a broker.  This preserves the Phase 1 fail-closed default for any
+        # client used outside the Phase 2 supervisor.
+        self.on_request = on_request
         self.on_exit = on_exit or (lambda code: None)
         self._process: Optional[subprocess.Popen[str]] = None
         self._reader: Optional[threading.Thread] = None
@@ -60,8 +65,18 @@ class CodexAppServerClient:
         if self.running:
             raise CodexProtocolError("app-server already running")
         self._stopping = False
+        # Do not inherit desktop MCP bridges. They are unrelated to an
+        # Ophanim mission and can delay a mission launch while attempting to
+        # attach to the desktop app.
+        command = executable_command(
+            self.executable,
+            "-c",
+            "mcp_servers={}",
+            "app-server",
+            "--stdio",
+        )
         self._process = subprocess.Popen(
-            executable_command(self.executable, "app-server", "--stdio"),
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -86,7 +101,7 @@ class CodexAppServerClient:
         method: str,
         params: Optional[dict[str, Any]] = None,
         *,
-        timeout: float = 30,
+        timeout: float = 120,
     ) -> dict[str, Any]:
         if not self.running:
             raise CodexProtocolError("app-server is not running")
@@ -113,6 +128,26 @@ class CodexAppServerClient:
     def notify(self, method: str, params: Optional[dict[str, Any]] = None) -> None:
         self._send({"jsonrpc": "2.0", "method": method, "params": params or {}})
 
+    def respond(
+        self,
+        request_id: int | str,
+        *,
+        result: Optional[dict[str, Any]] = None,
+        error: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Reply to a Codex-initiated JSON-RPC request.
+
+        The supervisor is the only caller in production.  Keeping this as a
+        small protocol primitive makes it impossible for UI code to invent a
+        response or bypass the broker's scope checks.
+        """
+        message: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id}
+        if error is not None:
+            message["error"] = error
+        else:
+            message["result"] = result or {}
+        self._send(message)
+
     def _send(self, message: dict[str, Any]) -> None:
         process = self._process
         if not process or not process.stdin:
@@ -135,7 +170,7 @@ class CodexAppServerClient:
             self.on_exit(code if code is not None else -1)
 
     def _handle_message(self, message: dict[str, Any]) -> None:
-        """Dispatch one protocol message; server requests always fail closed."""
+        """Dispatch one protocol message; unbrokered requests fail closed."""
         if "id" in message and "method" not in message:
             pending = self._pending.pop(message["id"], None)
             if pending:
@@ -144,21 +179,21 @@ class CodexAppServerClient:
                 event.set()
         elif "method" in message and "id" in message:
             method = str(message["method"])
-            self.denied_requests.append(method)
-            self._send(
-                {
-                    "jsonrpc": "2.0",
-                    "id": message["id"],
-                    "error": {
+            if self.on_request is not None:
+                self.on_request(message["id"], method, message.get("params", {}))
+            else:
+                self.denied_requests.append(method)
+                self.respond(
+                    message["id"],
+                    error={
                         "code": -32001,
-                        "message": "Ophanim Phase 1 observer is read-only",
+                        "message": "Ophanim client has no approval broker",
                     },
-                }
-            )
-            self.on_notification(
-                "observer/requestDenied",
-                {"requestedMethod": method, "reason": "read-only observer"},
-            )
+                )
+                self.on_notification(
+                    "observer/requestDenied",
+                    {"requestedMethod": method, "reason": "no approval broker"},
+                )
         elif "method" in message:
             self.on_notification(str(message["method"]), message.get("params", {}))
 

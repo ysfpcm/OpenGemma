@@ -1,9 +1,7 @@
-import { JarvisInterface } from '../components/Jarvis/jarvis-interface';
+import { ChatWorkspace } from '../components/Chat/ChatWorkspace';
 
 export function ChatPage() {
   return (
-    <div className="h-full w-full overflow-hidden">
-      <JarvisInterface />
-    </div>
+    <ChatWorkspace />
   );
 }

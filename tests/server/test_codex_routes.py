@@ -13,6 +13,7 @@ class StubSupervisor:
     def __init__(self, store: CodexMissionStore) -> None:
         self.store = store
         self.capabilities = {"mode": "read-only-observer", "protocol": "v2"}
+        self.roots = [Path("C:/configured-root")]
 
 
 def test_codex_api_exposes_only_redacted_normalized_history(tmp_path: Path) -> None:
@@ -23,7 +24,9 @@ def test_codex_api_exposes_only_redacted_normalized_history(tmp_path: Path) -> N
     app.include_router(router)
     client = TestClient(app)
 
-    assert client.get("/v1/codex/capabilities").json()["mode"] == "read-only-observer"
+    capabilities = client.get("/v1/codex/capabilities").json()
+    assert capabilities["mode"] == "read-only-observer"
+    assert capabilities["workspace_roots"] == ["C:\\configured-root"]
     listing = client.get("/v1/codex/missions").json()
     assert listing["mode"] == "read-only"
     assert listing["missions"][0]["id"] == mission_id

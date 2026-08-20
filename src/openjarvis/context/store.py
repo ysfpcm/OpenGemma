@@ -176,6 +176,25 @@ class RecentEventRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ContextEventRecord:
+    """Durable event record including source and receive timestamps."""
+
+    event_id: int
+    source_key: str
+    source_status: str
+    source_stale_after_seconds: int
+    external_event_id: str | None
+    external_entity_id: str | None
+    entity_type: str | None
+    entity_name: str | None
+    area: str | None
+    event_type: str
+    occurred_at: str
+    received_at: str
+    payload: Any
+
+
+@dataclass(frozen=True, slots=True)
 class SourceHealth:
     """Source status used for freshness warnings."""
 
@@ -810,6 +829,660 @@ class ContextStore:
             for row in rows
         ]
 
+    def get_event(self, event_id: int) -> ContextEventRecord:
+        """Return one durably ingested event, including its receive time."""
+        query = """
+            SELECT
+                ev.id AS event_id,
+                s.source_key,
+                s.status AS source_status,
+                s.stale_after_seconds,
+                ev.external_event_id,
+                e.external_id AS external_entity_id,
+                e.entity_type,
+                e.display_name AS entity_name,
+                e.area,
+                ev.event_type,
+                ev.occurred_at,
+                ev.received_at,
+                ev.payload_json
+            FROM context_events ev
+            JOIN context_sources s ON s.id = ev.source_id
+            LEFT JOIN context_entities e ON e.id = ev.entity_id
+            WHERE ev.id = ?
+        """
+        with self._lock:
+            row = self._conn.execute(query, (int(event_id),)).fetchone()
+        if row is None:
+            raise KeyError(event_id)
+        return ContextEventRecord(
+            event_id=int(row["event_id"]),
+            source_key=row["source_key"],
+            source_status=row["source_status"],
+            source_stale_after_seconds=int(row["stale_after_seconds"]),
+            external_event_id=row["external_event_id"],
+            external_entity_id=row["external_entity_id"],
+            entity_type=row["entity_type"],
+            entity_name=row["entity_name"],
+            area=row["area"],
+            event_type=row["event_type"],
+            occurred_at=row["occurred_at"],
+            received_at=row["received_at"],
+            payload=_json_value(row["payload_json"]),
+        )
+
+    # ------------------------------------------------------------------
+    # Durable one-time departure watcher records
+    # ------------------------------------------------------------------
+
+    def create_departure_watcher(
+        self,
+        *,
+        watcher_id: str,
+        conversation_id: str,
+        created_at: datetime | str,
+        armed_at: datetime | str,
+        expires_at: datetime | str,
+        status: str,
+        mode: str,
+        trigger: Mapping[str, Any],
+        action: Mapping[str, Any],
+        permissions: Mapping[str, Any],
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Persist a watcher definition and its initial lifecycle record."""
+        watcher_id = _validate_non_empty(watcher_id, "watcher_id")
+        conversation_id = _validate_non_empty(conversation_id, "conversation_id")
+        if status not in {
+            "ACTIVE",
+            "TRIGGERED",
+            "COMPLETED",
+            "EXPIRED",
+            "CANCELED",
+            "NEEDS_ATTENTION",
+        }:
+            raise ValueError(f"unsupported watcher status: {status}")
+        if mode not in {"simulation", "live"}:
+            raise ValueError("watcher mode must be simulation or live")
+        created = _timestamp(created_at)
+        armed = _timestamp(armed_at)
+        expires = _timestamp(expires_at)
+        if _parse_timestamp(expires) <= _parse_timestamp(armed):
+            raise ValueError("watcher expiration must be after armed_at")
+        updated = _timestamp(None)
+        trigger_json = _json_text(dict(trigger), field_name="watcher trigger")
+        action_json = _json_text(dict(action), field_name="watcher action")
+        permissions_json = _json_text(
+            dict(permissions), field_name="watcher permissions"
+        )
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO departure_watchers (
+                        watcher_id, conversation_id, created_at, armed_at,
+                        expires_at, status, mode, fire_count, trigger_json,
+                        action_json, permissions_json, last_error, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        watcher_id,
+                        conversation_id,
+                        created,
+                        armed,
+                        expires,
+                        status,
+                        mode,
+                        trigger_json,
+                        action_json,
+                        permissions_json,
+                        reason or None,
+                        updated,
+                    ),
+                )
+                self._conn.execute(
+                    """
+                    INSERT INTO departure_watcher_triggers (
+                        watcher_id, trigger_type, condition_json, created_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (watcher_id, "home_assistant_camera_event", trigger_json, created),
+                )
+                self._conn.execute(
+                    """
+                    INSERT INTO departure_watcher_lifecycle (
+                        watcher_id, status, reason, details_json, recorded_at
+                    ) VALUES (?, ?, ?, '{}', ?)
+                    """,
+                    (watcher_id, status, reason or "created", updated),
+                )
+        return self.get_departure_watcher(watcher_id)
+
+    def get_departure_watcher(self, watcher_id: str) -> dict[str, Any]:
+        """Return one watcher with all durable child records."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM departure_watchers WHERE watcher_id = ?",
+                (_validate_non_empty(watcher_id, "watcher_id"),),
+            ).fetchone()
+        if row is None:
+            raise KeyError(watcher_id)
+        result = self._watcher_row(row)
+        result["trigger_condition"] = result["trigger"]
+        result["events"] = self.list_departure_watcher_events(watcher_id)
+        result["evidence"] = self.list_departure_watcher_evidence(watcher_id)
+        result["device_states"] = self.list_departure_watcher_device_states(watcher_id)
+        result["authorizations"] = self.list_departure_watcher_authorizations(watcher_id)
+        result["rollbacks"] = self.list_departure_watcher_rollbacks(watcher_id)
+        result["lifecycle"] = self.list_departure_watcher_lifecycle(watcher_id)
+        return result
+
+    @staticmethod
+    def _watcher_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "watcher_id": row["watcher_id"],
+            "conversation_id": row["conversation_id"],
+            "created_at": row["created_at"],
+            "armed_at": row["armed_at"],
+            "expires_at": row["expires_at"],
+            "status": row["status"],
+            "mode": row["mode"],
+            "fire_count": int(row["fire_count"]),
+            "trigger": _json_value(row["trigger_json"]),
+            "action": _json_value(row["action_json"]),
+            "permissions": _json_value(row["permissions_json"]),
+            "cancellation_reason": row["cancellation_reason"],
+            "cancelled_at": row["cancelled_at"],
+            "triggered_at": row["triggered_at"],
+            "completed_at": row["completed_at"],
+            "last_error": row["last_error"],
+            "updated_at": row["updated_at"],
+        }
+
+    def list_active_departure_watchers(
+        self, *, now: datetime | str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return active watchers whose expiration has not yet passed."""
+        now_text = _timestamp(now)
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM departure_watchers
+                WHERE status = 'ACTIVE' AND expires_at > ?
+                ORDER BY expires_at, watcher_id
+                """,
+                (now_text,),
+            ).fetchall()
+        return [self._watcher_row(row) for row in rows]
+
+    def list_departure_watchers(
+        self, *, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List durable watcher definitions, optionally filtered by status."""
+        params: list[Any] = []
+        where = "1 = 1"
+        if status is not None:
+            where = "status = ?"
+            params.append(status)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM departure_watchers WHERE {where} ORDER BY created_at, watcher_id",
+                params,
+            ).fetchall()
+        return [self._watcher_row(row) for row in rows]
+
+    def set_departure_watcher_mode(self, watcher_id: str, mode: str) -> dict[str, Any]:
+        """Persist a mode transition after an explicit approval boundary."""
+        if mode not in {"simulation", "live"}:
+            raise ValueError("watcher mode must be simulation or live")
+        now_text = _timestamp(None)
+        with self._lock:
+            with self._conn:
+                cursor = self._conn.execute(
+                    "UPDATE departure_watchers SET mode = ?, updated_at = ? WHERE watcher_id = ?",
+                    (mode, now_text, _validate_non_empty(watcher_id, "watcher_id")),
+                )
+                if cursor.rowcount != 1:
+                    raise KeyError(watcher_id)
+        return self.get_departure_watcher(watcher_id)
+
+    def update_departure_watcher(
+        self,
+        watcher_id: str,
+        *,
+        status: str | None = None,
+        reason: str = "",
+        error: str | None = None,
+        increment_fire: bool = False,
+        triggered_at: datetime | str | None = None,
+        completed_at: datetime | str | None = None,
+        cancelled_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        """Update lifecycle state and append an immutable lifecycle record."""
+        watcher_id = _validate_non_empty(watcher_id, "watcher_id")
+        if status is not None and status not in {
+            "ACTIVE",
+            "TRIGGERED",
+            "COMPLETED",
+            "EXPIRED",
+            "CANCELED",
+            "NEEDS_ATTENTION",
+        }:
+            raise ValueError(f"unsupported watcher status: {status}")
+        now_text = _timestamp(None)
+        with self._lock:
+            with self._conn:
+                row = self._conn.execute(
+                    "SELECT status, fire_count FROM departure_watchers WHERE watcher_id = ?",
+                    (watcher_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(watcher_id)
+                previous_status = row["status"]
+                next_status = status or previous_status
+                fields = ["updated_at = ?"]
+                params: list[Any] = [now_text]
+                if status is not None:
+                    fields.append("status = ?")
+                    params.append(status)
+                if reason:
+                    fields.append("cancellation_reason = ?")
+                    params.append(reason if next_status == "CANCELED" else None)
+                if error is not None:
+                    fields.append("last_error = ?")
+                    params.append(error)
+                if increment_fire:
+                    fields.append("fire_count = fire_count + 1")
+                for column, value in (
+                    ("triggered_at", triggered_at),
+                    ("completed_at", completed_at),
+                    ("cancelled_at", cancelled_at),
+                ):
+                    if value is not None:
+                        fields.append(f"{column} = ?")
+                        params.append(_timestamp(value))
+                params.append(watcher_id)
+                self._conn.execute(
+                    f"UPDATE departure_watchers SET {', '.join(fields)} WHERE watcher_id = ?",
+                    params,
+                )
+                if status is not None and status != previous_status:
+                    self._conn.execute(
+                        """
+                        INSERT INTO departure_watcher_lifecycle (
+                            watcher_id, status, reason, details_json, recorded_at
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            watcher_id,
+                            status,
+                            reason,
+                            _json_text({}, field_name="lifecycle details"),
+                            now_text,
+                        ),
+                    )
+        return self.get_departure_watcher(watcher_id)
+
+    def record_departure_watcher_event(
+        self,
+        *,
+        watcher_id: str,
+        context_event_id: int,
+        home_assistant_event_id: str | None,
+        decision: str,
+        reason: str = "",
+        recorded_at: datetime | str | None = None,
+    ) -> bool:
+        """Record one watcher decision; duplicate event delivery is a no-op."""
+        with self._lock:
+            with self._conn:
+                cursor = self._conn.execute(
+                    """
+                    INSERT OR IGNORE INTO departure_watcher_events (
+                        watcher_id, context_event_id, home_assistant_event_id,
+                        decision, reason, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _validate_non_empty(watcher_id, "watcher_id"),
+                        int(context_event_id),
+                        home_assistant_event_id,
+                        _validate_non_empty(decision, "decision"),
+                        reason,
+                        _timestamp(recorded_at),
+                    ),
+                )
+                return cursor.rowcount == 1
+
+    def record_departure_watcher_evidence(
+        self,
+        *,
+        evidence_id: str,
+        watcher_id: str,
+        context_event_id: int | None,
+        evidence_kind: str,
+        classification: str,
+        source_scope: str,
+        facts: Mapping[str, Any],
+        recorded_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        if classification not in {
+            "observed",
+            "inferred",
+            "stale",
+            "uncertain",
+            "contradictory",
+        }:
+            raise ValueError(f"unsupported evidence classification: {classification}")
+        body = {
+            "evidence_id": _validate_non_empty(evidence_id, "evidence_id"),
+            "watcher_id": _validate_non_empty(watcher_id, "watcher_id"),
+            "context_event_id": context_event_id,
+            "evidence_kind": _validate_non_empty(evidence_kind, "evidence_kind"),
+            "classification": classification,
+            "source_scope": _validate_non_empty(source_scope, "source_scope"),
+            "facts": dict(facts),
+            "recorded_at": _timestamp(recorded_at),
+        }
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT OR REPLACE INTO departure_watcher_evidence (
+                        evidence_id, watcher_id, context_event_id, evidence_kind,
+                        classification, source_scope, facts_json, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        body["evidence_id"],
+                        body["watcher_id"],
+                        body["context_event_id"],
+                        body["evidence_kind"],
+                        body["classification"],
+                        body["source_scope"],
+                        _json_text(body["facts"], field_name="evidence facts"),
+                        body["recorded_at"],
+                    ),
+                )
+        return body
+
+    def record_departure_watcher_device_state(
+        self,
+        *,
+        watcher_id: str,
+        phase: str,
+        entity_id: str,
+        state: Any,
+        classification: str,
+        observed_at: datetime | str,
+        recorded_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        if phase not in {"pre_action", "post_action", "verification"}:
+            raise ValueError(f"unsupported device-state phase: {phase}")
+        if classification not in {
+            "observed",
+            "inferred",
+            "stale",
+            "uncertain",
+            "contradictory",
+        }:
+            raise ValueError(f"unsupported device-state classification: {classification}")
+        body = {
+            "watcher_id": _validate_non_empty(watcher_id, "watcher_id"),
+            "phase": phase,
+            "entity_id": _validate_non_empty(entity_id, "entity_id"),
+            "state": state,
+            "classification": classification,
+            "observed_at": _timestamp(observed_at),
+            "recorded_at": _timestamp(recorded_at),
+        }
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO departure_watcher_device_states (
+                        watcher_id, phase, entity_id, state_json,
+                        classification, observed_at, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        body["watcher_id"],
+                        body["phase"],
+                        body["entity_id"],
+                        _json_text(body["state"], field_name="device state"),
+                        body["classification"],
+                        body["observed_at"],
+                        body["recorded_at"],
+                    ),
+                )
+        return body
+
+    def record_departure_watcher_authorization(
+        self,
+        *,
+        authorization_id: str,
+        watcher_id: str,
+        action_id: str | None,
+        decision: str,
+        authority: str,
+        required: Mapping[str, Any],
+        scope: Mapping[str, Any],
+        details: Mapping[str, Any] = (),
+        recorded_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        body = {
+            "authorization_id": _validate_non_empty(authorization_id, "authorization_id"),
+            "watcher_id": _validate_non_empty(watcher_id, "watcher_id"),
+            "action_id": action_id,
+            "decision": _validate_non_empty(decision, "decision"),
+            "authority": _validate_non_empty(authority, "authority"),
+            "required": dict(required),
+            "scope": dict(scope),
+            "details": dict(details),
+            "recorded_at": _timestamp(recorded_at),
+        }
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT OR REPLACE INTO departure_watcher_authorizations (
+                        authorization_id, watcher_id, action_id, decision,
+                        authority, required_json, scope_json, details_json, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        body["authorization_id"],
+                        body["watcher_id"],
+                        body["action_id"],
+                        body["decision"],
+                        body["authority"],
+                        _json_text(body["required"], field_name="authorization requirements"),
+                        _json_text(body["scope"], field_name="authorization scope"),
+                        _json_text(body["details"], field_name="authorization details"),
+                        body["recorded_at"],
+                    ),
+                )
+        return body
+
+    def record_departure_watcher_rollback(
+        self,
+        *,
+        watcher_id: str,
+        action_id: str | None,
+        method: str,
+        prior_state: Any,
+        status: str,
+        details: Mapping[str, Any] = (),
+        recorded_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        body = {
+            "watcher_id": _validate_non_empty(watcher_id, "watcher_id"),
+            "action_id": action_id,
+            "method": _validate_non_empty(method, "method"),
+            "prior_state": prior_state,
+            "status": _validate_non_empty(status, "status"),
+            "details": dict(details),
+            "recorded_at": _timestamp(recorded_at),
+        }
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO departure_watcher_rollbacks (
+                        watcher_id, action_id, method, prior_state_json,
+                        status, details_json, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        body["watcher_id"],
+                        body["action_id"],
+                        body["method"],
+                        _json_text(body["prior_state"], field_name="prior state")
+                        if body["prior_state"] is not None
+                        else None,
+                        body["status"],
+                        _json_text(body["details"], field_name="rollback details"),
+                        body["recorded_at"],
+                    ),
+                )
+        return body
+
+    def list_departure_watcher_events(self, watcher_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, context_event_id, home_assistant_event_id,
+                       decision, reason, recorded_at
+                FROM departure_watcher_events
+                WHERE watcher_id = ? ORDER BY id
+                """,
+                (watcher_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_departure_watcher_evidence(self, watcher_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT evidence_id, context_event_id, evidence_kind,
+                       classification, source_scope, facts_json, recorded_at
+                FROM departure_watcher_evidence
+                WHERE watcher_id = ? ORDER BY recorded_at, evidence_id
+                """,
+                (watcher_id,),
+            ).fetchall()
+        return [
+            {
+                "evidence_id": row["evidence_id"],
+                "context_event_id": row["context_event_id"],
+                "evidence_kind": row["evidence_kind"],
+                "classification": row["classification"],
+                "source_scope": row["source_scope"],
+                "facts": _json_value(row["facts_json"]),
+                "recorded_at": row["recorded_at"],
+            }
+            for row in rows
+        ]
+
+    def list_departure_watcher_device_states(self, watcher_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, phase, entity_id, state_json, classification,
+                       observed_at, recorded_at
+                FROM departure_watcher_device_states
+                WHERE watcher_id = ? ORDER BY id
+                """,
+                (watcher_id,),
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "phase": row["phase"],
+                "entity_id": row["entity_id"],
+                "state": _json_value(row["state_json"]),
+                "classification": row["classification"],
+                "observed_at": row["observed_at"],
+                "recorded_at": row["recorded_at"],
+            }
+            for row in rows
+        ]
+
+    def list_departure_watcher_authorizations(self, watcher_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, authorization_id, action_id, decision, authority,
+                       required_json, scope_json, details_json, recorded_at
+                FROM departure_watcher_authorizations
+                WHERE watcher_id = ? ORDER BY id
+                """,
+                (watcher_id,),
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "authorization_id": row["authorization_id"],
+                "action_id": row["action_id"],
+                "decision": row["decision"],
+                "authority": row["authority"],
+                "required": _json_value(row["required_json"]),
+                "scope": _json_value(row["scope_json"]),
+                "details": _json_value(row["details_json"]),
+                "recorded_at": row["recorded_at"],
+            }
+            for row in rows
+        ]
+
+    def list_departure_watcher_rollbacks(self, watcher_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, action_id, method, prior_state_json, status,
+                       details_json, recorded_at
+                FROM departure_watcher_rollbacks
+                WHERE watcher_id = ? ORDER BY id
+                """,
+                (watcher_id,),
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "action_id": row["action_id"],
+                "method": row["method"],
+                "prior_state": (
+                    _json_value(row["prior_state_json"])
+                    if row["prior_state_json"] is not None
+                    else None
+                ),
+                "status": row["status"],
+                "details": _json_value(row["details_json"]),
+                "recorded_at": row["recorded_at"],
+            }
+            for row in rows
+        ]
+
+    def list_departure_watcher_lifecycle(self, watcher_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, status, reason, details_json, recorded_at
+                FROM departure_watcher_lifecycle
+                WHERE watcher_id = ? ORDER BY id
+                """,
+                (watcher_id,),
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "status": row["status"],
+                "reason": row["reason"],
+                "details": _json_value(row["details_json"]),
+                "recorded_at": row["recorded_at"],
+            }
+            for row in rows
+        ]
+
     def get_source_health(
         self,
         *,
@@ -945,6 +1618,7 @@ class ContextStore:
 __all__ = [
     "ApplyResult",
     "ContextEvent",
+    "ContextEventRecord",
     "ContextStore",
     "CurrentStateRecord",
     "RecentEventRecord",

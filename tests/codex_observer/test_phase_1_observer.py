@@ -37,8 +37,14 @@ class FakeClient:
             return {"thread": {"id": "thread-1"}}
         if method == "turn/start":
             return {"turn": {"id": "turn-1", "status": "inProgress"}}
+        if method == "turn/steer":
+            return {"turn": {"id": params["expectedTurnId"], "status": "inProgress"}}
+        if method == "turn/interrupt":
+            return {"turn": {"id": params["turnId"], "status": "interrupted"}}
         if method == "thread/resume":
             return {"thread": {"id": params["threadId"]}}
+        if method == "thread/fork":
+            return {"thread": {"id": "thread-2"}}
         if method == "thread/list":
             return {"data": [{"id": "thread-1"}]}
         if method == "thread/read":
@@ -220,6 +226,49 @@ def test_restart_preserves_ledger_and_resumes_same_thread(
     assert replacement.requests[-1][0] == "thread/resume"
     assert replacement.requests[-1][1]["sandbox"] == "read-only"
     assert store.get(mission["id"])["phase"] == "recovered"
+
+
+def test_phase_two_controls_target_only_the_persisted_active_turn(
+    store: CodexMissionStore, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = FakeClient()
+    observer = CodexObserverSupervisor(store, roots=[str(workspace)], client=client)
+    mission = observer.start_mission("Inspect", str(workspace))
+
+    observer.steer_mission(mission["id"], "Prioritize the failing test")
+    assert client.requests[-1] == (
+        "turn/steer",
+        {"threadId": "thread-1", "expectedTurnId": "turn-1", "input": [{"type": "text", "text": "Prioritize the failing test"}]},
+    )
+    observer.interrupt_mission(mission["id"])
+    assert client.requests[-1] == (
+        "turn/interrupt", {"threadId": "thread-1", "turnId": "turn-1"}
+    )
+    controlled = store.get(mission["id"])
+    assert controlled["phase"] == "interrupting"
+    assert [entry["action"] for entry in controlled["controls"]] == ["steer", "interrupt"]
+
+
+def test_phase_two_fork_remains_read_only_and_resume_starts_a_new_turn(
+    store: CodexMissionStore, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = FakeClient()
+    observer = CodexObserverSupervisor(store, roots=[str(workspace)], client=client)
+    mission = observer.start_mission("Inspect", str(workspace))
+    fork = observer.fork_mission(mission["id"])
+    assert fork["thread_id"] == "thread-2"
+    assert client.requests[-1][1]["sandbox"] == "read-only"
+    assert client.requests[-1][1]["approvalPolicy"] == "never"
+
+    store.update(mission["id"], status="completed", phase="complete")
+    resumed = observer.resume_mission(mission["id"], "Continue with the test findings")
+    assert resumed["status"] == "running"
+    assert client.requests[-1][0] == "turn/start"
+    assert client.requests[-1][1]["sandboxPolicy"] == {"type": "readOnly", "networkAccess": False}
 
 
 def test_observed_error_is_blocked_and_published_as_error(

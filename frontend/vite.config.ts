@@ -35,7 +35,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        navigateFallbackDenylist: [/^\/v1\//, /^\/health/, /^\/dashboard/, /^\/api\//],
+        navigateFallbackDenylist: [/^\/v1\//, /^\/health/, /^\/api\//],
       },
     }),
   ],
@@ -48,7 +48,6 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom'],
           markdown: ['react-markdown', 'rehype-highlight', 'remark-gfm'],
-          charts: ['recharts'],
           router: ['react-router'],
         },
       },

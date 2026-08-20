@@ -87,6 +87,7 @@ _CONSOLE_EVENTS = {
     EventType.SNAPSHOT_FAILED,
     EventType.CODEX_MISSION_UPDATE,
     EventType.CODEX_MISSION_ERROR,
+    EventType.CODEX_MISSION_DECISION,
 }
 
 _CONSOLE_CATEGORIES = {
@@ -169,6 +170,10 @@ _SAFE_CONSOLE_KEYS = {
     "updated_state_count",
     "mission_id",
     "summary",
+    "decision_id",
+    "kind",
+    "guardian_allowed",
+    "offered_count",
 }
 
 
@@ -187,9 +192,16 @@ def _console_level(event_name: str, data: dict[str, Any]) -> str:
         "snapshot_failed",
     }:
         return "error"
-    if event_name in {"security_alert", "tool_timeout", "agent_stall_detected", "agent_budget_exceeded"}:
+    if event_name in {
+        "security_alert",
+        "tool_timeout",
+        "agent_stall_detected",
+        "agent_budget_exceeded",
+    }:
         return "warn"
-    if event_name in {"camera_status", "home_assistant_status"} and data.get("status") in {"offline", "degraded"}:
+    if event_name in {"camera_status", "home_assistant_status"} and data.get(
+        "status"
+    ) in {"offline", "degraded"}:
         return "warn"
     if data.get("success") is False:
         return "error"
@@ -238,8 +250,7 @@ def _safe_console_payload(event: Event) -> dict[str, Any]:
     safe_data = {
         key: value
         for key, value in raw.items()
-        if key in _SAFE_CONSOLE_KEYS
-        and isinstance(value, (str, int, float, bool))
+        if key in _SAFE_CONSOLE_KEYS and isinstance(value, (str, int, float, bool))
     }
     return {
         "type": event_name,
@@ -286,7 +297,9 @@ def create_ws_router(
     console_history = history or ConsoleEventHistory()
     # Each connected client gets a queue + loop ref for thread-safe event delivery
     clients: dict[WebSocket, tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = {}
-    console_clients: dict[WebSocket, tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = {}
+    console_clients: dict[
+        WebSocket, tuple[asyncio.Queue, asyncio.AbstractEventLoop]
+    ] = {}
 
     def _on_event(event: Event) -> None:
         """Forward event to all connected WebSocket client queues (thread-safe)."""
@@ -382,7 +395,11 @@ def create_ws_router(
     async def system_event_history(limit: int = 2_000) -> dict[str, Any]:
         """Return recent sanitized console events for history views."""
         events = console_history.snapshot(limit)
-        return {"events": events, "count": len(events), "limit": max(0, min(limit, 2_000))}
+        return {
+            "events": events,
+            "count": len(events),
+            "limit": max(0, min(limit, 2_000)),
+        }
 
     return router
 

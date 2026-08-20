@@ -7,8 +7,16 @@ from openjarvis.connectors._stubs import (
     SyncStatus,
 )
 from openjarvis.connectors.store import KnowledgeStore
+from openjarvis.connectors.durable_rag import DurableRagIndex
 
-__all__ = ["Attachment", "BaseConnector", "Document", "KnowledgeStore", "SyncStatus"]
+__all__ = [
+    "Attachment",
+    "BaseConnector",
+    "Document",
+    "DurableRagIndex",
+    "KnowledgeStore",
+    "SyncStatus",
+]
 
 # Auto-register built-in connectors
 import openjarvis.connectors.obsidian  # noqa: F401

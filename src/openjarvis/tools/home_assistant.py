@@ -41,16 +41,6 @@ _READ_ACTIONS = {
     "get_battery",
     "get_motion",
 }
-_ATTRIBUTE_ACTIONS = {
-    "set_brightness",
-    "set_color",
-    "set_color_temperature",
-    "set_temperature",
-    "set_hvac_mode",
-    "set_fan_speed",
-    "set_volume",
-    "set_cover_position",
-}
 
 
 def _normalise(value: object) -> str:
@@ -90,11 +80,15 @@ class HomeAssistantTool(BaseTool):
                     "action": {
                         "type": "string",
                         "enum": sorted(INTENT_CATALOG),
-                        "description": "Canonical operation from the Ophanim intent catalog.",
+                        "description": (
+                            "Canonical operation from the Ophanim intent catalog."
+                        ),
                     },
                     "entity": {
                         "type": "string",
-                        "description": "Friendly device name or Home Assistant entity id.",
+                        "description": (
+                            "Friendly device name or Home Assistant entity id."
+                        ),
                     },
                     "brightness_pct": {
                         "type": "number",
@@ -105,7 +99,11 @@ class HomeAssistantTool(BaseTool):
                         "type": ["string", "array"],
                         "description": "Named color or RGB array such as [255, 0, 0].",
                     },
-                    "color_temp_kelvin": {"type": "number", "minimum": 1000, "maximum": 10000},
+                    "color_temp_kelvin": {
+                        "type": "number",
+                        "minimum": 1000,
+                        "maximum": 10000,
+                    },
                     "temperature": {"type": "number"},
                     "hvac_mode": {"type": "string"},
                     "percentage": {"type": "number", "minimum": 0, "maximum": 100},
@@ -124,53 +122,23 @@ class HomeAssistantTool(BaseTool):
         spec = get_intent_spec(action)
         if spec is None:
             return self._failure("Unsupported Home Assistant action.")
+        if action not in _READ_ACTIONS:
+            # Phase 3 closes the direct-write escape hatch.  The same private
+            # service helpers are used only by registered Guardian adapters,
+            # which re-check scoped authority and independently read back the
+            # effect.  Reads remain available without an authorization grant.
+            return self._failure(
+                "Home Assistant writes require an explicit Guardian authorization."
+            )
 
         try:
             states = self._get_states()
-            if action in _READ_ACTIONS:
-                return self._execute_read(action, entity_query, states)
-
-            target = self._find_target(states, entity_query, spec.domains)
-            if target is None:
-                return self._failure(
-                    f"I couldn't find a unique Home Assistant device for {entity_query or 'that request'}."
-                )
-
-            entity_id = str(target["entity_id"])
-            domain = _domain(target)
-            service = spec.service
-            if not service:
-                return self._failure(f"No service is configured for {action}.")
-
-            body = self._service_body(action, params)
-            if body:
-                self._call_service(domain, service, entity_id, body)
-            else:
-                # Keep the three-argument form for simple actions and for
-                # compatibility with existing integrations/tests.
-                self._call_service(domain, service, entity_id)
-
-            if spec.verification == "ack":
-                return self._success(
-                    f"Home Assistant accepted {action.replace('_', ' ')} for {_display_name(target)}.",
-                    target,
-                    action=action,
-                )
-
-            verified = self._verify_write(action, target, params)
-            if verified is None:
-                return self._failure(
-                    f"Home Assistant accepted the request, but I couldn't verify {action.replace('_', ' ')} for {_display_name(target)}."
-                )
-            return self._success(
-                self._write_success_text(action, verified),
-                verified,
-                action=action,
-            )
+            return self._execute_read(action, entity_query, states)
         except Exception:
             logger.exception("Home Assistant tool request failed")
             return self._failure(
-                "I couldn't reach Home Assistant right now, so I did not confirm a device change."
+                "I couldn't reach Home Assistant right now, so I did not "
+                "confirm a device change."
             )
 
     def _execute_read(
@@ -192,7 +160,9 @@ class HomeAssistantTool(BaseTool):
 
         if state is None:
             label = action.replace("get_", "").replace("_", " ")
-            return self._failure(f"No matching {label} device was found in Home Assistant.")
+            return self._failure(
+                f"No matching {label} device was found in Home Assistant."
+            )
         if action == "get_state":
             return self._state_result(state, action=action)
 
@@ -217,7 +187,9 @@ class HomeAssistantTool(BaseTool):
 
     def _service_body(self, action: str, params: Mapping[str, Any]) -> dict[str, Any]:
         if action == "set_brightness":
-            value = self._bounded_number(params.get("brightness_pct"), 0, 100, "brightness_pct")
+            value = self._bounded_number(
+                params.get("brightness_pct"), 0, 100, "brightness_pct"
+            )
             return {"brightness_pct": value}
         if action == "set_color":
             color = params.get("color")
@@ -228,19 +200,31 @@ class HomeAssistantTool(BaseTool):
             else:
                 rgb = None
             if rgb is None or any(not isinstance(value, (int, float)) for value in rgb):
-                raise ValueError("color must be a supported name or three-number RGB array")
+                raise ValueError(
+                    "color must be a supported name or three-number RGB array"
+                )
             if any(float(value) < 0 or float(value) > 255 for value in rgb):
                 raise ValueError("RGB values must be between 0 and 255")
             return {"rgb_color": [int(value) for value in rgb]}
         if action == "set_color_temperature":
-            value = self._bounded_number(params.get("color_temp_kelvin"), 1000, 10000, "color_temp_kelvin")
+            value = self._bounded_number(
+                params.get("color_temp_kelvin"), 1000, 10000, "color_temp_kelvin"
+            )
             return {"color_temp_kelvin": value}
         if action == "set_temperature":
             value = self._number(params.get("temperature"), "temperature")
             return {"temperature": value}
         if action == "set_hvac_mode":
             value = str(params.get("hvac_mode") or "").strip().lower()
-            if value not in {"off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"}:
+            if value not in {
+                "off",
+                "heat",
+                "cool",
+                "heat_cool",
+                "auto",
+                "dry",
+                "fan_only",
+            }:
                 raise ValueError("unsupported HVAC mode")
             return {"hvac_mode": value}
         if action == "set_fan_speed":
@@ -262,17 +246,25 @@ class HomeAssistantTool(BaseTool):
     ) -> dict[str, Any] | None:
         entity_id = str(original["entity_id"])
         if action in {"turn_on", "turn_off"}:
-            return self._wait_for_state(entity_id, "on" if action == "turn_on" else "off")
+            return self._wait_for_state(
+                entity_id, "on" if action == "turn_on" else "off"
+            )
         if action == "toggle":
             current = str(original.get("state") or "").lower()
             expected = "off" if current == "on" else "on"
             return self._wait_for_state(entity_id, expected)
         if action in {"open_cover", "close_cover"}:
-            return self._wait_for_state(entity_id, "open" if action == "open_cover" else "closed")
+            return self._wait_for_state(
+                entity_id, "open" if action == "open_cover" else "closed"
+            )
         if action in {"lock", "unlock"}:
-            return self._wait_for_state(entity_id, "locked" if action == "lock" else "unlocked")
+            return self._wait_for_state(
+                entity_id, "locked" if action == "lock" else "unlocked"
+            )
         if action in {"enable_automation", "disable_automation"}:
-            return self._wait_for_state(entity_id, "on" if action == "enable_automation" else "off")
+            return self._wait_for_state(
+                entity_id, "on" if action == "enable_automation" else "off"
+            )
 
         expected = self._expected_attribute(action, params)
         if expected is None:
@@ -307,7 +299,9 @@ class HomeAssistantTool(BaseTool):
             if target is None:
                 return None
             expected = [int(value) for value in target]
-            return lambda state: state.get("attributes", {}).get("rgb_color") == expected
+            return lambda state: (
+                state.get("attributes", {}).get("rgb_color") == expected
+            )
         if action == "set_color_temperature":
             target = float(params["color_temp_kelvin"])
 
@@ -334,8 +328,7 @@ class HomeAssistantTool(BaseTool):
                 ]
                 values.append(state.get("state"))
                 return any(
-                    value is not None
-                    and _numeric_close(value, target, tolerance=0.5)
+                    value is not None and _numeric_close(value, target, tolerance=0.5)
                     for value in values
                 )
 
@@ -411,7 +404,9 @@ class HomeAssistantTool(BaseTool):
             payload.update(dict(body))
         self._request("POST", f"/api/services/{domain}/{service}", payload)
 
-    def _wait_for_state(self, entity_id: str, expected_state: str) -> dict[str, Any] | None:
+    def _wait_for_state(
+        self, entity_id: str, expected_state: str
+    ) -> dict[str, Any] | None:
         return self._wait_for_attribute(
             entity_id,
             lambda state: str(state.get("state", "")).lower() == expected_state.lower(),
@@ -429,16 +424,16 @@ class HomeAssistantTool(BaseTool):
             time.sleep(0.4)
         return None
 
-    def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+    def _request(
+        self, method: str, path: str, body: dict[str, Any] | None = None
+    ) -> Any:
         base_url = (
             os.environ.get("HA_URL")
             or os.environ.get("HOME_ASSISTANT_URL")
             or "http://127.0.0.1:8123"
         ).rstrip("/")
         token = (
-            os.environ.get("HA_TOKEN")
-            or os.environ.get("HOME_ASSISTANT_TOKEN")
-            or ""
+            os.environ.get("HA_TOKEN") or os.environ.get("HOME_ASSISTANT_TOKEN") or ""
         ).strip()
         if not token:
             raise RuntimeError("Home Assistant is not configured")
@@ -460,9 +455,7 @@ class HomeAssistantTool(BaseTool):
     ) -> dict[str, Any] | None:
         allowed = set(domains)
         candidates = [
-            state
-            for state in states
-            if "*" in allowed or _domain(state) in allowed
+            state for state in states if "*" in allowed or _domain(state) in allowed
         ]
         query_key = _normalise(query)
         if not query_key:
@@ -519,13 +512,19 @@ class HomeAssistantTool(BaseTool):
             )
         ]
         if query:
-            return HomeAssistantTool._find_target(candidates, query, ("sensor", "climate"))
+            return HomeAssistantTool._find_target(
+                candidates, query, ("sensor", "climate")
+            )
         preferred = [
             state
             for state in candidates
             if _DEFAULT_TEMPERATURE_HINT in _normalise(_display_name(state))
         ]
-        return preferred[0] if len(preferred) == 1 else (candidates[0] if len(candidates) == 1 else None)
+        return (
+            preferred[0]
+            if len(preferred) == 1
+            else (candidates[0] if len(candidates) == 1 else None)
+        )
 
     @staticmethod
     def _find_reading(
@@ -537,8 +536,13 @@ class HomeAssistantTool(BaseTool):
         for state in states:
             attributes = state.get("attributes", {})
             device_class = str(attributes.get("device_class") or "").lower()
-            haystack = f"{_normalise(_display_name(state))} {_normalise(state.get('entity_id'))}"
-            if kind == "humidity" and (device_class == "humidity" or "humidity" in haystack):
+            haystack = (
+                f"{_normalise(_display_name(state))} "
+                f"{_normalise(state.get('entity_id'))}"
+            )
+            if kind == "humidity" and (
+                device_class == "humidity" or "humidity" in haystack
+            ):
                 candidates.append(state)
             elif kind == "battery" and (
                 device_class == "battery"
@@ -556,7 +560,9 @@ class HomeAssistantTool(BaseTool):
             return HomeAssistantTool._find_target(candidates, query, ("*",))
         return candidates[0] if len(candidates) == 1 else None
 
-    def _state_result(self, state: dict[str, Any], *, action: str = "get_state") -> ToolResult:
+    def _state_result(
+        self, state: dict[str, Any], *, action: str = "get_state"
+    ) -> ToolResult:
         label = _display_name(state)
         value = str(state.get("state") or "unknown")
         if value == "on":
@@ -594,7 +600,9 @@ class HomeAssistantTool(BaseTool):
             raise ValueError(f"{name} must be numeric") from exc
 
     @classmethod
-    def _bounded_number(cls, value: Any, minimum: float, maximum: float, name: str) -> float:
+    def _bounded_number(
+        cls, value: Any, minimum: float, maximum: float, name: str
+    ) -> float:
         number = cls._number(value, name)
         if not minimum <= number <= maximum:
             raise ValueError(f"{name} must be between {minimum:g} and {maximum:g}")

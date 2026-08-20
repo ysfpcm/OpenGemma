@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from openjarvis.tools.home_assistant import HomeAssistantTool
-
 
 _STATES = [
     {
@@ -35,36 +32,29 @@ def test_default_temperature_prefers_kitchen_echo_dot(monkeypatch) -> None:
     assert result.content == "Kitchen Echo Dot Temperature is 68.72 °F."
 
 
-def test_turn_off_only_succeeds_after_verified_state(monkeypatch) -> None:
+def test_turn_off_is_rejected_without_guardian_authorization(monkeypatch) -> None:
     tool = HomeAssistantTool()
     recorded: list[tuple[str, str, str]] = []
-    verified: dict[str, Any] = {
-        "entity_id": "light.livingroomlamp",
-        "state": "off",
-        "attributes": {"friendly_name": "Living Room Lamp"},
-    }
     monkeypatch.setattr(tool, "_get_states", lambda: _STATES)
     monkeypatch.setattr(
         tool,
         "_call_service",
-        lambda domain, service, entity_id: recorded.append((domain, service, entity_id)),
+        lambda domain, service, entity_id: recorded.append(
+            (domain, service, entity_id)
+        ),
     )
-    monkeypatch.setattr(tool, "_wait_for_state", lambda *_: verified)
-
-    result = tool.execute(action="turn_off", entity="living room lamp")
-
-    assert result.success is True
-    assert result.content == "Living Room Lamp is now off."
-    assert recorded == [("light", "turn_off", "light.livingroomlamp")]
-
-
-def test_turn_off_reports_unverified_when_state_never_changes(monkeypatch) -> None:
-    tool = HomeAssistantTool()
-    monkeypatch.setattr(tool, "_get_states", lambda: _STATES)
-    monkeypatch.setattr(tool, "_call_service", lambda *_: None)
-    monkeypatch.setattr(tool, "_wait_for_state", lambda *_: None)
-
     result = tool.execute(action="turn_off", entity="living room lamp")
 
     assert result.success is False
-    assert "couldn't verify" in result.content.lower()
+    assert "guardian authorization" in result.content.lower()
+    assert recorded == []
+
+
+def test_unguarded_home_write_does_not_call_service(monkeypatch) -> None:
+    tool = HomeAssistantTool()
+    monkeypatch.setattr(tool, "_get_states", lambda: _STATES)
+    monkeypatch.setattr(tool, "_call_service", lambda *_: None)
+    result = tool.execute(action="turn_off", entity="living room lamp")
+
+    assert result.success is False
+    assert "guardian authorization" in result.content.lower()

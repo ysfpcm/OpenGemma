@@ -992,6 +992,9 @@ class HomeAssistantContextSource:
             }[normalized.event_type]
             bus_data = {
                 "source": _SOURCE_KEY,
+                "context_event_id": result.event_id,
+                "source_event_id": normalized.source_event_id,
+                "entity_id": normalized.entity_id,
                 "entity_name": normalized.entity_name,
                 "entity_type": "camera" if normalized.entity_domain == "camera" else normalized.entity_domain,
                 "camera_event": normalized.event_type,

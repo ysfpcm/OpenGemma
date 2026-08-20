@@ -1,0 +1,15 @@
+{
+  "benchmark_id": "phase8-rag-v1",
+  "duplicate_ingest_free": true,
+  "hit_rate": 1.0,
+  "mean_reciprocal_rank": 1.0,
+  "model_independent": true,
+  "query_count": 4,
+  "restart_consistent": true,
+  "result_ids": [
+    ["rag-persistence"],
+    ["rag-model-independent"],
+    ["rag-quality-benchmark"],
+    ["rag-idempotency"]
+  ]
+}

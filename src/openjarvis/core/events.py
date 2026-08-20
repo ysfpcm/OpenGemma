@@ -94,6 +94,8 @@ class EventType(str, Enum):
     # Phase 1 — read-only Codex observer
     CODEX_MISSION_UPDATE = "codex_mission_update"
     CODEX_MISSION_ERROR = "codex_mission_error"
+    # Phase 2 — human mission-control decision is waiting for Marc
+    CODEX_MISSION_DECISION = "codex_mission_decision"
 
 
 @dataclass(slots=True)

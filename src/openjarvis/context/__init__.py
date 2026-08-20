@@ -22,6 +22,7 @@ from openjarvis.context.runtime import (
 from openjarvis.context.store import (
     ApplyResult,
     ContextEvent,
+    ContextEventRecord,
     ContextStore,
     StateValue,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "ApplyResult",
     "ContextBuilder",
     "ContextEvent",
+    "ContextEventRecord",
     "ContextRequest",
     "ContextSnapshot",
     "ContextStore",

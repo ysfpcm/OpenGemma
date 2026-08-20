@@ -93,9 +93,9 @@ _RECORDS = [
         "answer": "Sessions are managed via SessionStore using SQLite with SessionIdentity for canonical user identification across channels. Storage is reduced through the consolidate() method which summarizes old messages.",
     },
     {
-        "documents": "Desktop Application Guide:\nThe OpenJarvis desktop app uses Tauri 2.0. Its current dashboard combines EnergyDashboard (real-time power monitoring), CostComparison (local-versus-cloud savings), and TraceDebugger (timeline inspection). Tauri commands proxy to the OpenJarvis REST API.",
+        "documents": "Desktop Application Guide:\nThe OpenJarvis desktop app uses Tauri 2.0. Its dashboard combines a live activity terminal with the Context Atlas for local memory inspection. Codex missions and shadow situations are available in the Operations view. Tauri commands proxy to the OpenJarvis REST API.",
         "question": "What framework does the desktop app use and which dashboard views are available?",
-        "answer": "The desktop app uses Tauri 2.0. Its dashboard views are EnergyDashboard, CostComparison, and TraceDebugger.",
+        "answer": "The desktop app uses Tauri 2.0. Its dashboard provides a live activity terminal and the Context Atlas; Codex missions and shadow situations are in Operations.",
     },
     {
         "documents": "API Server Reference:\nThe OpenAI-compatible server is started via 'jarvis serve'. Core endpoints: POST /v1/chat/completions, GET /v1/models, GET /health. Extended endpoints cover agents, memory, traces, telemetry, learning, skills, sessions, budget, and metrics. SSE streaming is supported on /v1/chat/completions with stream=true. WebSocket streaming is available at WS /v1/chat/stream.",

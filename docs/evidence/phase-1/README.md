@@ -1,6 +1,6 @@
 # Phase 1 evidence — Codex read-only observer
 
-Phase 1 is **verifying**. The implementation and exit-gate evidence are complete; Marc's acceptance remains pending. Phase 2 has not started.
+Phase 1 is **verified**. Marc accepted the completed implementation and exit-gate evidence on 2026-08-15. Phase 2 is now **verified** separately; see `docs/evidence/phase-2/README.md` for the bounded workspace-write, approval-broker, fork, budget, and rollback evidence.
 
 ## Reproducible source and environment
 
@@ -101,4 +101,4 @@ Operational rollback:
 - Phase 1 observes only explicitly started missions and configured roots; it does not auto-start from personal context.
 - An App Server exit can leave Codex reporting that a writer remains active. Ophanim reads and labels that state without taking control; it does not steer or force ownership.
 - Raw diagnostic payloads are local and owner-restricted on supported filesystems; Windows also relies on the containing directory's inherited ACL.
-- No approve, steer, interrupt, fork, remote-control, or automatic stall-recovery UI is present. Those remain Phase 2 work.
+- Remote control and automatic stall recovery remain deferred. Phase 2 mission controls and approval routing are documented in `docs/evidence/phase-2/README.md`.
