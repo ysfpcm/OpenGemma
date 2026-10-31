@@ -499,16 +499,32 @@ class AgentManager:
     def find_binding_for_channel(
         self, channel_type: str, channel_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Find a dedicated binding for a specific channel."""
+        """Find a dedicated binding for a specific channel.
+
+        Most channel adapters have a distinct channel ID (for example a Slack
+        channel).  SendBlue has one inbound endpoint for its configured line,
+        so a binding created from the Messaging UI has no separate ``channel``
+        value.  In that unambiguous single-binding case, use the binding rather
+        than silently falling back to the server's generic agent.
+        """
         rows = self._conn.execute(
             "SELECT * FROM channel_bindings WHERE channel_type = ?",
             (channel_type,),
         ).fetchall()
+        bindings = []
         for row in rows:
             binding = self._row_to_binding(row)
+            bindings.append(binding)
             config = binding.get("config", {})
             if config.get("channel") == channel_id:
                 return binding
+        dedicated = [
+            binding
+            for binding in bindings
+            if binding.get("routing_mode", "dedicated") == "dedicated"
+        ]
+        if len(dedicated) == 1:
+            return dedicated[0]
         return None
 
     # ── Templates ─────────────────────────────────────────────────

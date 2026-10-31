@@ -69,6 +69,36 @@ The task runs as the current user with `LogonType=Interactive` and
 gap), has no execution-time limit, and starts when available (catches
 up if missed).
 
+## SendBlue inbound messages (development)
+
+SendBlue needs a public HTTPS endpoint to deliver inbound texts to the local
+server. Set these **User** environment variables first; never put their values
+in source control:
+
+```powershell
+[Environment]::SetEnvironmentVariable('SENDBLUE_API_KEY_ID', '...', 'User')
+[Environment]::SetEnvironmentVariable('SENDBLUE_API_SECRET_KEY', '...', 'User')
+[Environment]::SetEnvironmentVariable('SENDBLUE_FROM_NUMBER', '+15551234567', 'User')
+```
+
+With OpenJarvis listening on `127.0.0.1:8000`, start the helper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\windows\sendblue-tunnel.ps1
+```
+
+It starts a LocalTunnel endpoint and registers
+`https://<tunnel>/webhooks/sendblue` with SendBlue, replacing stale receive
+URLs while preserving other event types. It stores only non-secret tunnel
+metadata in `~\.openjarvis\shared\sendblue-tunnel.json`.
+
+LocalTunnel is useful only for development. Its URL changes after a restart and
+may show an anti-abuse interstitial that a webhook provider cannot answer. If
+SendBlue shows delivery but OpenJarvis sees no request, replace it with a
+named Cloudflare Tunnel or authenticated ngrok endpoint. Verify the complete
+path with a real inbound message; `/v1/channels/sendblue/health` confirms only
+local binding health, not third-party delivery.
+
 ## Loopback vs LAN-exposed
 
 By default the scheduled task binds `127.0.0.1` — reachable only from

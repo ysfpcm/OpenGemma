@@ -207,6 +207,21 @@ class TestOrchestratorAgent:
         assert "tools" in call_kwargs
         assert len(call_kwargs["tools"]) == 1
 
+    def test_function_calling_includes_custom_system_prompt(self):
+        """Managed-agent instructions must reach function-calling models."""
+        engine = _make_engine_no_tools()
+        agent = OrchestratorAgent(
+            engine,
+            "test-model",
+            system_prompt="Use the Gmail tool before answering email requests.",
+        )
+
+        agent.run("Summarize my recent email.")
+
+        messages = engine.generate.call_args[0][0]
+        assert messages[0].role == Role.SYSTEM
+        assert messages[0].content == "Use the Gmail tool before answering email requests."
+
     def test_no_tools_no_tools_kwarg(self):
         engine = _make_engine_no_tools()
         agent = OrchestratorAgent(engine, "test-model")

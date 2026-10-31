@@ -143,3 +143,48 @@ class TestDetectAgentIntent:
         system = _FakeSystem()
         orchestrator = QueryOrchestrator(system)
         assert orchestrator._detect_agent_intent("what's the weather") is None
+
+
+class TestBuildTools:
+    def test_reuses_live_connector_tool(self):
+        class _Spec:
+            name = "gmail_search_emails"
+
+        class _ConnectorTool:
+            spec = _Spec()
+
+        gmail_tool = _ConnectorTool()
+        system = _FakeSystem(tools=[gmail_tool])
+        orchestrator = QueryOrchestrator(system)
+
+        assert orchestrator._build_tools(["gmail_search_emails"]) == [gmail_tool]
+
+    def test_discovers_requested_connected_connector_tool(self, monkeypatch):
+        class _Spec:
+            name = "gmail_search_emails"
+            description = "Search Gmail"
+            parameters = {"type": "object", "properties": {}}
+
+        class _Connector:
+            def is_connected(self):
+                return True
+
+            def mcp_tools(self):
+                return [_Spec()]
+
+            def execute_mcp_tool(self, name, **kwargs):
+                return (name, kwargs)
+
+        from openjarvis.core.registry import ConnectorRegistry
+
+        monkeypatch.setattr(
+            ConnectorRegistry,
+            "items",
+            classmethod(lambda cls: [("gmail", _Connector)]),
+        )
+        orchestrator = QueryOrchestrator(_FakeSystem())
+
+        tools = orchestrator._build_tools(["gmail_search_emails"])
+
+        assert len(tools) == 1
+        assert tools[0].spec.name == "gmail_search_emails"

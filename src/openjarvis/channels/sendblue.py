@@ -130,7 +130,7 @@ class SendBlueChannel(BaseChannel):
             logger.warning(
                 "SendBlue API returned status %d: %s",
                 resp.status_code,
-                resp.text[:200],
+                resp.text,
             )
             return False
         except Exception:
